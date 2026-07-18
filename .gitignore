@@ -1,0 +1,9 @@
+/bin/
+*.out
+.DS_Store
+.kovan/
+/kovan
+.kovan.yaml
+CLAUDE.md
+CLAUDE.local.md
+docs/AGENTS.md

@@ -7,7 +7,7 @@ import (
 
 func TestPromptFirstTime(t *testing.T) {
 	got, err := Prompt(Data{
-		Repo:        "/work/webapp",
+		Repo:        "/work/gobee",
 		ClaudeMD:    "/home/bora/.claude/CLAUDE.md",
 		Account:     "personal",
 		Reference:   "/work/agent",
@@ -17,7 +17,7 @@ func TestPromptFirstTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"/work/webapp",                     // repo path
+		"/work/gobee",                     // repo path
 		"/home/bora/.claude/CLAUDE.md",    // claude md
 		"this repo's account is personal", // account filled
 		"/work/agent",                     // reference lifted
@@ -31,14 +31,14 @@ func TestPromptFirstTime(t *testing.T) {
 }
 
 func TestPromptGlobalAlreadySet(t *testing.T) {
-	got, err := Prompt(Data{Repo: "/work/webapp", GlobalEmpty: false})
+	got, err := Prompt(Data{Repo: "/work/gobee", GlobalEmpty: false})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(got, "Global method") || strings.Contains(got, "kovan method link") {
 		t.Errorf("global section should be omitted when global is non-empty:\n%s", got)
 	}
-	if !strings.Contains(got, "This repo") || !strings.Contains(got, "/work/webapp") {
+	if !strings.Contains(got, "This repo") || !strings.Contains(got, "/work/gobee") {
 		t.Error("repo section should always be present")
 	}
 }

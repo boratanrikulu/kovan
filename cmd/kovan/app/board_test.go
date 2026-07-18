@@ -13,7 +13,7 @@ import (
 func TestFilterRows(t *testing.T) {
 	rows := []boardRow{
 		{ID: "TASK-1", Repo: "agent", Mode: "code", Title: "fix vfs", State: "working"},
-		{ID: "f0a8", Repo: "webapp", Mode: "review", Title: "review pr", State: "idle"},
+		{ID: "f0a8", Repo: "gobee", Mode: "review", Title: "review pr", State: "idle"},
 		{ID: "old", Repo: "kovan", Mode: "code", Title: "done thing", State: "archived"},
 	}
 
@@ -28,7 +28,7 @@ func TestFilterRows(t *testing.T) {
 		t.Errorf("mode filter = %v, want [f0a8]", got)
 	}
 	// Filter by repo substring.
-	if got := filterRows(rows, "webapp", false); len(got) != 1 || got[0].ID != "f0a8" {
+	if got := filterRows(rows, "gobee", false); len(got) != 1 || got[0].ID != "f0a8" {
 		t.Errorf("repo filter = %v, want [f0a8]", got)
 	}
 	// A filter matching an archived row still respects showArchived.

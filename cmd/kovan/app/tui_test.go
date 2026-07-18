@@ -689,7 +689,7 @@ func TestAIEditArgs(t *testing.T) {
 func TestProjectPicker(t *testing.T) {
 	projects := []project{
 		{name: "agent", root: "/repos/agent"},
-		{name: "webapp", root: "/repos/webapp"},
+		{name: "gobee", root: "/repos/gobee"},
 		{name: "kovan", root: "/repos/kovan"},
 	}
 
@@ -701,16 +701,16 @@ func TestProjectPicker(t *testing.T) {
 
 	// Typing filters by name substring.
 	f := projectPicker{projects: projects}
-	for _, r := range "web" {
+	for _, r := range "bee" {
 		f = f.update(runeKey(r))
 	}
 	items := f.items()
-	// matches webapp, plus the always-present "path: web" entry.
-	if len(items) != 2 || items[0].root != "/repos/webapp" {
-		t.Fatalf("filtered items = %v, want [webapp, path:web]", items)
+	// matches gobee, plus the always-present "path: bee" entry.
+	if len(items) != 2 || items[0].root != "/repos/gobee" {
+		t.Fatalf("filtered items = %v, want [gobee, path:bee]", items)
 	}
-	if f.value().root != "/repos/webapp" {
-		t.Errorf("filtered selection = %q, want /repos/webapp", f.value().root)
+	if f.value().root != "/repos/gobee" {
+		t.Errorf("filtered selection = %q, want /repos/gobee", f.value().root)
 	}
 
 	// A query that matches nothing known is usable as a direct path.

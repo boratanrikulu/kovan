@@ -85,14 +85,20 @@ gates:
   patterns: []           # your own gates, see below
 ```
 
+The `read_only` and `write_paths` gates enforce a mode's posture. A mode's
+write paths are defined in its `mode.yaml`, see [Modes](#modes).
+
 Custom gates are regex patterns run against every command segment:
 
 ```yaml
 gates:
   patterns:
     - match: "terraform +(apply|destroy)"
-      action: ask        # ask | deny
+      action: ask        # escalate to you
       reason: "kovan: confirm terraform changes"
+    - match: 'rm\s+-rf\s+/'
+      action: deny       # block outright, no prompt
+      reason: "kovan: refusing rm -rf /"
 ```
 
 A bad regexp is skipped, never fatal. `reason` is the line the agent (and
@@ -147,9 +153,17 @@ add your own by creating `~/.kovan/modes/<name>/` with a `prompt.md`
 (`posture: edit|read-only`, `docs: [...]`, `write_paths: [...]`), and an
 optional `method.md` the agent carries across sessions. `write_paths` scopes
 an editing mode to a corner of the repo, or acts as a carve-out from
-read-only. Posture and write paths are resolved from the files at every gate
-check, so editing them reaches running sessions immediately; a repo can add
-its own carve-outs for scoped modes with `write_paths:` in `.kovan.yaml`.
+read-only:
+
+```yaml
+# ~/.kovan/modes/docs-only/mode.yaml
+posture: read-only
+write_paths: [docs/]     # carve-out: read-only everywhere, editable under docs/
+```
+
+Posture and write paths are resolved from the files at every gate check, so
+editing them reaches running sessions immediately; a repo can add its own
+carve-outs for scoped modes with `write_paths:` in `.kovan.yaml`.
 
 ## tmux
 

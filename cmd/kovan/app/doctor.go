@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/mode"
@@ -18,10 +21,21 @@ var doctorCmd = &cobra.Command{
 	Long: `Compares ~/.kovan/config.yaml (and, inside a repo, .kovan.yaml) with the
 current binary: keys it no longer reads, keys added since the file was
 written, and values it would reject or silently ignore. Report only; the
-files are never modified. Exits 1 when something needs attention.`,
+files are never modified. Exits 1 when something needs attention.
+
+With --sync the files are rewritten in place: template documentation is
+refreshed, every line you set is kept exactly as written, and dead keys are
+removed only after you confirm each one. A .bak sibling is written first.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		clean, err := runDoctor(cmd.OutOrStdout())
+		var decide func(config.Finding) bool
+		if doctorSyncFlag {
+			if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+				return fmt.Errorf("doctor --sync is interactive; run it on a terminal")
+			}
+			decide = promptRemoval
+		}
+		clean, err := runDoctor(cmd.OutOrStdout(), decide)
 		if err != nil {
 			return err
 		}
@@ -32,19 +46,44 @@ files are never modified. Exits 1 when something needs attention.`,
 	},
 }
 
-func runDoctor(w io.Writer) (clean bool, err error) {
+var doctorSyncFlag bool
+
+func init() {
+	doctorCmd.Flags().BoolVar(&doctorSyncFlag, "sync", false,
+		"rewrite the files: refresh docs, keep your settings, confirm removals")
+}
+
+// stdinPrompts is shared across prompts so buffered input is not lost between
+// questions.
+var stdinPrompts = bufio.NewReader(os.Stdin)
+
+// promptRemoval asks on the terminal whether one dead key should go. Default
+// is no: an unanswered or mistyped prompt keeps the key.
+func promptRemoval(f config.Finding) bool {
+	fmt.Printf("remove %s (%s)? [y/N] ", f.Path, f.Note)
+	line, _ := stdinPrompts.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+// runDoctor reports on both config files; a non-nil decide also syncs them,
+// asking decide about each dead key.
+func runDoctor(w io.Writer, decide func(config.Finding) bool) (clean bool, err error) {
 	home, err := config.Dir()
 	if err != nil {
 		return false, err
 	}
-	global, globalClean := doctorGlobal(w, home)
-	repoClean := doctorRepo(w, home, global)
+	global, globalClean := doctorGlobal(w, home, decide)
+	repoClean := doctorRepo(w, home, global, decide)
 	return globalClean && repoClean, nil
 }
 
 // doctorGlobal reports on ~/.kovan/config.yaml and returns the loaded config
 // for the repo checks that reference it (nil when it cannot be loaded).
-func doctorGlobal(w io.Writer, home string) (*config.Global, bool) {
+func doctorGlobal(w io.Writer, home string, decide func(config.Finding) bool) (*config.Global, bool) {
 	path := filepath.Join(home, "config.yaml")
 	rep, data := checkFile(path, config.CheckGlobal)
 	var global *config.Global
@@ -55,10 +94,14 @@ func doctorGlobal(w io.Writer, home string) (*config.Global, bool) {
 		}
 	}
 	printReport(w, path, rep)
-	return global, reportClean(rep)
+	clean := reportClean(rep)
+	if decide != nil {
+		clean = syncStep(w, path, rep, data, config.SyncGlobal, config.CheckGlobal, decide)
+	}
+	return global, clean
 }
 
-func doctorRepo(w io.Writer, home string, global *config.Global) bool {
+func doctorRepo(w io.Writer, home string, global *config.Global, decide func(config.Finding) bool) bool {
 	repo, err := openRepo()
 	if err != nil {
 		return true // not inside a repo: nothing to check
@@ -72,7 +115,60 @@ func doctorRepo(w io.Writer, home string, global *config.Global) bool {
 	}
 	fmt.Fprintln(w)
 	printReport(w, path, rep)
-	return reportClean(rep)
+	clean := reportClean(rep)
+	if decide != nil {
+		clean = syncStep(w, path, rep, data, config.SyncRepo, config.CheckRepo, decide)
+	}
+	return clean
+}
+
+// syncStep rewrites one config file: decide is asked about each dead key, the
+// original is kept as a .bak sibling, and the merged file replaces it. The
+// returned clean is the post-sync state; value problems survive a sync because
+// user-set values are never changed.
+func syncStep(w io.Writer, path string, rep *config.Report, data []byte,
+	sync func([]byte, map[string]bool) []byte,
+	recheck func([]byte) *config.Report,
+	decide func(config.Finding) bool) bool {
+	if rep.Missing || rep.ParseErr != "" {
+		return reportClean(rep)
+	}
+	remove := map[string]bool{}
+	if !rep.Pristine {
+		asked := map[string]bool{}
+		for _, f := range append(append([]config.Finding{}, rep.Dead...), rep.Stale...) {
+			if asked[f.Path] {
+				continue
+			}
+			asked[f.Path] = true
+			remove[f.Path] = decide(f)
+		}
+	}
+	out := sync(data, remove)
+	if bytes.Equal(out, data) {
+		fmt.Fprintln(w, "  already in sync")
+		return reportClean(rep)
+	}
+	if err := writeWithBackup(path, data, out); err != nil {
+		fmt.Fprintln(w, "  sync failed:", err)
+		return false
+	}
+	fmt.Fprintf(w, "  synced (backup at %s.bak)\n", path)
+	return reportClean(recheck(out)) && len(rep.Values) == 0
+}
+
+func writeWithBackup(path string, old, new []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(path+".bak", old, mode); err != nil {
+		return fmt.Errorf("write backup: %w", err)
+	}
+	if err := os.WriteFile(path, new, mode); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 func checkFile(path string, check func([]byte) *config.Report) (*config.Report, []byte) {

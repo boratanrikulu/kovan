@@ -146,7 +146,11 @@ func syncStep(w io.Writer, path string, rep *config.Report, data []byte,
 	}
 	out := sync(data, remove)
 	if bytes.Equal(out, data) {
-		fmt.Fprintln(w, "  already in sync")
+		// a clean report already said "ok"; only a declined removal leaves
+		// something behind worth naming
+		if !reportClean(rep) || len(rep.Stale) > 0 || len(rep.New) > 0 {
+			fmt.Fprintln(w, "  nothing changed")
+		}
 		return reportClean(rep)
 	}
 	if err := writeWithBackup(path, data, out); err != nil {

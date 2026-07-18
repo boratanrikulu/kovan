@@ -232,8 +232,9 @@ func TestDoctorSyncInSyncFileUntouched(t *testing.T) {
 	if _, err := runDoctor(&out, func(config.Finding) bool { return true }); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "already in sync") {
-		t.Errorf("output misses the in-sync line:\n%s", out.String())
+	// the report's ok line says it all: no extra sync line, no backup
+	if strings.Contains(out.String(), "nothing changed") || strings.Contains(out.String(), "synced") {
+		t.Errorf("clean file got a sync line:\n%s", out.String())
 	}
 	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
 		t.Errorf("backup written although nothing changed")

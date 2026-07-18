@@ -2,7 +2,7 @@
 
 > **Teach your engineering methodology once. Every future agent inherits it.**
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/boratanrikulu/kovan)](https://goreportcard.com/report/github.com/boratanrikulu/kovan)
+![test](https://github.com/boratanrikulu/kovan/actions/workflows/test.yml/badge.svg)
 [![License](https://img.shields.io/github/license/boratanrikulu/kovan)](LICENSE)
 
 AI agents are temporary. Your way of working isn't.

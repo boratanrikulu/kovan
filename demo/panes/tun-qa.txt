@@ -1,0 +1,10 @@
+⏺ Bash(sudo ./bin/gecit up --dry-run)
+  ⎿  utun4 configured, routes staged, dry-run ok
+
+⏺ Check 3/5 green: device create, address assign, dry-run route staging all
+  pass. Next: real route install and the teardown-restores-routes check.
+
+⏺ Bash(netstat -rn | head -20)
+  ⎿  Routing tables …
+
+✳ Verifying… (esc to interrupt)

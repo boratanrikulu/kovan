@@ -1,0 +1,11 @@
+⏺ Bash(make verify)
+  ⎿  verifier: R3 unbounded memory access, make sure to bounds check any such access
+  ⎿  Error: exit status 1
+
+⏺ Reproduced. The rejection comes from the unbounded loop the map iteration
+  lowers to. Two ways out: rewrite it as a bounded loop with a max-entries
+  cap, or switch to the bpf_for_each callback form. The bounded loop keeps
+  codegen simple but caps iteration; the callback form is uncapped but
+  changes the emitted call shape. Which shape do you want?
+
+· Waiting for your input…

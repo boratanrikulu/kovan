@@ -1,0 +1,11 @@
+⏺ Read(finance/subscriptions.md)
+  ⎿  Read 28 lines
+
+⏺ Write(finance/reports/monthly.md)
+  ⎿  Wrote monthly report draft
+
+⏺ Report drafted: totals, category deltas, and the recurring list are in.
+  One subscription shows no usage since the spring and renews next week —
+  keep or cancel? I left it flagged in the report either way.
+
+· Waiting for your input…

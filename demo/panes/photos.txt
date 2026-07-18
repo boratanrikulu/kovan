@@ -1,0 +1,10 @@
+⏺ Bash(./scripts/resize.sh shortlist/ --max-width 1600)
+  ⎿  6 images written to public/photos/2026-07/
+
+⏺ Shortlist resized. Writing captions next, then the post page and the
+  publish step — I'll stop before anything goes live.
+
+⏺ Write(content/posts/photo-walk.md)
+  ⎿  Wrote post skeleton with image refs
+
+✳ Composing… (esc to interrupt)

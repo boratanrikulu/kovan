@@ -1,0 +1,10 @@
+⏺ Read(internal/extract/requirements.go)
+  ⎿  Read 214 lines
+
+⏺ Write(review.md)
+  ⎿  Wrote findings table: 2 medium, 1 low
+
+⏺ Review done. The extraction misses helpers gated behind kernel-version
+  checks (medium), double-counts requirements pulled via CO-RE (medium),
+  and one error path drops the source location (low). Full table with
+  file:line pointers is in review.md — ready to discuss whenever you are.

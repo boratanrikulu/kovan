@@ -1,0 +1,10 @@
+⏺ Bash(llvm-objdump -d build/probe-O2.o | grep -A3 'r7 +=')
+  ⎿  r7 += r6 … r7 spilled to stack slot -16 before the range check
+
+⏺ Write(analysis.md)
+  ⎿  Updated analysis.md: headline + evidence section
+
+⏺ Answered. At -O2 the compiler spills the bounds-checked register and
+  reloads it after the check, so the verifier loses the range it proved.
+  The -O1 output keeps it live in-register, which is why it passes.
+  Evidence with instruction offsets is in analysis.md.

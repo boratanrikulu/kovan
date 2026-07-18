@@ -1,0 +1,12 @@
+⏺ Read(CHANGELOG.md)
+  ⎿  Read 61 lines
+
+⏺ Write(draft.md)
+  ⎿  Wrote v0.2 release notes draft (38 lines)
+
+⏺ Draft is ready in draft.md. It leads with the connection-tracking rework,
+  then the CLI flag changes, and keeps the tone dry per soul.md. One thing
+  I want your read on: the opening paragraph — I have two versions and kept
+  the shorter one. Voice check before I call it final?
+
+· Waiting for your input…

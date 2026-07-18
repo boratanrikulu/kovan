@@ -1,0 +1,10 @@
+⏺ Bash(go test ./internal/sockops/...)
+  ⎿  ok   gecit/internal/sockops   0.42s
+
+⏺ IPv6 tuple extraction passes on the sock_ops path. Wiring the v6 case
+  into the redirect map next, then the integration matrix.
+
+⏺ Edit(internal/sockops/redirect.go)
+  ⎿  Updated internal/sockops/redirect.go with 14 additions and 2 removals
+
+✳ Forging… (esc to interrupt · ctrl+t to show todos)

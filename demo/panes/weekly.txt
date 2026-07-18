@@ -1,0 +1,9 @@
+⏺ Read(journal/this-week.md)
+  ⎿  Read 42 lines
+
+⏺ Write(mentor/check-ins/week-28.md)
+  ⎿  Wrote dated check-in
+
+⏺ Week reviewed. Two threads carried over from last week, one closed, and
+  the reading queue is stable. The check-in note is in the vault under
+  mentor/check-ins. Nothing urgent surfaced.

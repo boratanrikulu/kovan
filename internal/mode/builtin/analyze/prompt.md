@@ -1,0 +1,1 @@
+Read your brief at {{brief}} — it states what to analyze and any sources to read. Study the sources and the codebase, then write your analysis to {{artifact}} with concrete file:line evidence for each claim. Do not change any code. When the analysis is ready, summarize the headline findings for me. Follow the repo's AGENTS.md.

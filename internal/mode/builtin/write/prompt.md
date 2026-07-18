@@ -1,0 +1,1 @@
+Read your brief at {{brief}} — it states what to write and for whom. Draft it into {{artifact}} in my voice (follow soul.md: direct, short sentences mixed with long, honest about tradeoffs, no marketing words, no em dashes). Do not change any code. When you have a draft, share the opening and the outline for my feedback before polishing. Follow the repo's AGENTS.md.

@@ -24,6 +24,7 @@ type Finding struct {
 type Report struct {
 	Missing  bool      // file does not exist; defaults apply
 	ParseErr string    // file is not valid YAML
+	Pristine bool      // no active keys: the file is documentation only
 	Dead     []Finding // active keys the current schema does not know
 	Stale    []Finding // commented keys the current schema does not know
 	New      []Finding // template keys the file never mentions
@@ -51,6 +52,7 @@ func check(data []byte, schema map[string]nodeKind, template string, newTarget f
 	active := activePaths(&doc, schema)
 	commented := parseKeys(string(data), schema)
 	activeSet := pathSet(active)
+	rep.Pristine = len(active) == 0
 	mentioned := pathSet(append(commented, active...))
 
 	rep.Dead = unknownFindings(active, schema, nil,
@@ -144,23 +146,57 @@ func pathSet(ms []mention) map[string]bool {
 // dash, and a snake_case key. Prose comments almost never look like this.
 var keyLine = regexp.MustCompile(`^(\s*)(- )?([a-z0-9_]+):(.*)$`)
 
+// lineInfo is one line of a config file or template: its original text plus,
+// when the line is (or documents) a YAML key, that key's place in the schema.
+type lineInfo struct {
+	text    string
+	blank   bool
+	comment bool   // whole-line comment
+	key     bool   // is, or documents, a YAML key
+	active  bool   // key && !comment
+	indent  int    // key lines: indentation after uncommenting
+	path    string // key lines: schema-normalized path
+	raw     string // key lines: path as written
+	doc     string // key lines: trailing comment text
+}
+
 // parseKeys scans yaml-shaped text line by line, uncommenting as it goes, and
 // returns every key path it mentions, active and commented alike, in order.
 func parseKeys(text string, schema map[string]nodeKind) []mention {
+	var out []mention
+	for _, li := range parseLines(text, schema) {
+		if li.key {
+			out = append(out, mention{path: li.path, raw: li.raw, doc: li.doc})
+		}
+	}
+	return out
+}
+
+// parseLines classifies every line of yaml-shaped text, resolving key lines
+// (active and commented alike) to schema paths via an indentation stack.
+func parseLines(text string, schema map[string]nodeKind) []lineInfo {
 	type frame struct {
 		indent    int
 		path, raw string
 	}
 	var stack []frame
-	var out []mention
+	var out []lineInfo
 	pop := func(indent int) {
 		for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
 			stack = stack[:len(stack)-1]
 		}
 	}
 	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		li := lineInfo{
+			text:    line,
+			blank:   trimmed == "",
+			comment: strings.HasPrefix(trimmed, "#"),
+			indent:  indentOf(line),
+		}
 		m := keyLine.FindStringSubmatch(uncomment(line))
 		if m == nil {
+			out = append(out, li)
 			continue
 		}
 		indent, key, rest := len(m[1]), m[3], m[4]
@@ -184,9 +220,15 @@ func parseKeys(text string, schema map[string]nodeKind) []mention {
 		}
 		path, raw := joinPath(parentPath, seg), joinPath(parentRaw, key)
 		stack = append(stack, frame{indent, path, raw})
-		out = append(out, mention{path: path, raw: raw, doc: trailingComment(rest)})
+		li.key, li.active = true, !li.comment
+		li.indent, li.path, li.raw, li.doc = indent, path, raw, trailingComment(rest)
+		out = append(out, li)
 	}
 	return out
+}
+
+func indentOf(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " "))
 }
 
 // uncomment turns a whole-line comment back into the line it documents,

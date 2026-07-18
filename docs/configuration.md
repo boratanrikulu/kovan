@@ -66,6 +66,14 @@ Report only; your files are never modified. Inside a repo it covers
 `.kovan.yaml` too. Exits `1` when something needs attention (unparseable
 file, dead keys, bad values); staleness alone is informational and exits `0`.
 
+`kovan doctor --sync` brings the files up to date in place. Template
+documentation refreshes silently; every line you set is kept exactly as
+written, and notes you wrote next to your settings travel with them; removing
+a dead key asks first, one question per key, defaulting to keep. A file with nothing uncommented is documentation only and is replaced
+by the fresh template without questions. The original is saved next to the
+file as `.bak` before anything is written. Values you set are never changed,
+so anything under "check values" stays yours to fix.
+
 ## Accounts
 
 Run agents under different Claude accounts on one machine, regardless of

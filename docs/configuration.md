@@ -45,6 +45,27 @@ every line shows its default, uncomment to override). `KOVAN_HOME` moves the
 | `mode` | (none) | default task mode for this repo |
 | `write_paths` | (none) | extra allowed write prefixes for this repo's scoped modes (adds to the mode's own list) |
 
+## Checking your config
+
+Templates are scaffolded once and never touched again, so a config written
+months ago drifts: keys get removed, new gates and options land. `kovan
+doctor` compares your files with the binary you are running and reports,
+grouped per file:
+
+- **no longer read** — keys you set that the current binary does not know
+  (removed keys, typos).
+- **stale comments** — keys your file still documents in comments that no
+  longer exist.
+- **new since your config was written** — options the current template has
+  that your file never mentions, one line each with what it does.
+- **check values** — values the loader rejects or the code silently ignores
+  (a gate action that is not `ask`/`off`, an invalid pattern regexp, an
+  unknown palette color, an account without a valid token file).
+
+Report only; your files are never modified. Inside a repo it covers
+`.kovan.yaml` too. Exits `1` when something needs attention (unparseable
+file, dead keys, bad values); staleness alone is informational and exits `0`.
+
 ## Accounts
 
 Run agents under different Claude accounts on one machine, regardless of

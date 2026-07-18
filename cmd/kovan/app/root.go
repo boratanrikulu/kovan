@@ -50,6 +50,7 @@ func init() {
 	)
 	setupCmd.GroupID = "setup"
 	initCmd.GroupID = "setup"
+	doctorCmd.GroupID = "setup"
 	startCmd.GroupID = "agents"
 	openCmd.GroupID = "agents"
 	removeCmd.GroupID = "agents"
@@ -68,6 +69,7 @@ func init() {
 	rootCmd.AddCommand(
 		setupCmd,
 		initCmd,
+		doctorCmd,
 		startCmd,
 		openCmd,
 		removeCmd,

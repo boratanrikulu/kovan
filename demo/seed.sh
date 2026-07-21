@@ -256,8 +256,8 @@ for repo in gecit gobee bpfvet durdur quik vault website; do
 done
 
 # Public method + domain wiring for the repos the method view showcases: the
-# repo's own committed method files are the project (public) layer, .kovan.yaml
-# selects the domain. gecit's CLAUDE.md @imports docs/AGENTS.md, so the method
+# repo's own committed method files are the project (public) layer; the repo's
+# ~/.kovan/projects/<repo>/config.yaml selects the domain. gecit's CLAUDE.md @imports docs/AGENTS.md, so the method
 # view shows the import nested under it (the ↳ in the public layer).
 mkdir -p "$REPOS/gecit/docs"
 cat >"$REPOS/gecit/CLAUDE.md" <<'EOF'
@@ -274,8 +274,8 @@ cat >"$REPOS/gecit/docs/AGENTS.md" <<'EOF'
 eBPF programs live under bpf/, the loader under internal/. The verifier is
 the reviewer that matters: keep programs simple enough to pass it.
 EOF
-printf 'domain: code\n' >"$REPOS/gecit/.kovan.yaml"
-demo_git -C "$REPOS/gecit" add CLAUDE.md docs/AGENTS.md .kovan.yaml
+printf 'domain: code\n' >"$HOME_DIR/projects/gecit/config.yaml"
+demo_git -C "$REPOS/gecit" add CLAUDE.md docs/AGENTS.md
 demo_git -C "$REPOS/gecit" commit -qm "docs: claude entry, agents, kovan config"
 
 cat >"$REPOS/vault/AGENTS.md" <<'EOF'
@@ -284,15 +284,15 @@ cat >"$REPOS/vault/AGENTS.md" <<'EOF'
 A notes vault, not a code repo. Markdown only; the folder layout is the
 API. Agents work in-place on main and stay inside their mode's folders.
 EOF
-printf 'domain: notes\n' >"$REPOS/vault/.kovan.yaml"
-demo_git -C "$REPOS/vault" add AGENTS.md .kovan.yaml
+printf 'domain: notes\n' >"$HOME_DIR/projects/vault/config.yaml"
+demo_git -C "$REPOS/vault" add AGENTS.md
 demo_git -C "$REPOS/vault" commit -qm "docs: agents and kovan config"
 
 # The remaining repos each get a public AGENTS.md and a domain, so every
 # agent's method view has a project (public) layer, not just gecit and vault.
-pub() { # pub <repo> <domain>: commit the AGENTS.md already written + a domain.
-	printf 'domain: %s\n' "$2" >"$REPOS/$1/.kovan.yaml"
-	demo_git -C "$REPOS/$1" add AGENTS.md .kovan.yaml
+pub() { # pub <repo> <domain>: commit the AGENTS.md + set the repo domain in ~/.kovan.
+	printf 'domain: %s\n' "$2" >"$HOME_DIR/projects/$1/config.yaml"
+	demo_git -C "$REPOS/$1" add AGENTS.md
 	demo_git -C "$REPOS/$1" commit -qm "docs: agents and kovan config"
 }
 

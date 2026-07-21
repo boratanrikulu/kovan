@@ -14,6 +14,16 @@ kovan composes FIVE layers, general → specific. Everything you find sorts into
 
 An empty layer is normal (e.g. domains/code may not exist yet) — it contributes
 nothing; don't invent content to fill it.
+
+## First, check whether there is anything to sort
+
+If this repo has NO AGENTS.md, NO CLAUDE.md, and no `.claude/skills/` — nothing
+to lift into layers — say so to the user plainly, skip the sorting below
+entirely, and go straight to setting the repo's defaults in `<repo>/.kovan.yaml`
+together (worktree prefix/base/branch_template, task.dir, account, domain, mode).
+{{- if .GlobalEmpty}} The global bootstrap section still applies first, since the
+global method is empty.{{end}} Then you are done — don't invent files for empty
+layers.
 {{if .GlobalEmpty}}
 ## Global method (the global layer ~/.kovan/method/global/ is empty)
 

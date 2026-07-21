@@ -3,7 +3,7 @@ the repo's existing AI setup — you add structure, you never replace its files.
 kovan has already scaffolded ~/.kovan/. This is ITERATIVE: expect several rounds
 of propose → "go" → write, not one big propose-then-go gate. Each round, SHOW
 your plan and WAIT for the user's "go" before writing. Never clobber an existing
-.kovan.yaml, method file, or skill — propose the change and confirm.
+repo config, method file, or skill — propose the change and confirm.
 
 kovan composes FIVE layers, general → specific. Everything you find sorts into one:
 - global  → ~/.kovan/method/global/           every agent, every repo
@@ -19,8 +19,8 @@ nothing; don't invent content to fill it.
 
 If this repo has NO AGENTS.md, NO CLAUDE.md, and no `.claude/skills/` — nothing
 to lift into layers — say so to the user plainly, skip the sorting below
-entirely, and go straight to setting the repo's defaults in `<repo>/.kovan.yaml`
-together (worktree prefix/base/branch_template, task.dir, account, domain, mode).
+entirely, and go straight to setting the repo's defaults in
+`~/.kovan/projects/<repo>/config.yaml` together (worktree prefix/base/branch_template, task.dir, account, domain, mode).
 {{- if .GlobalEmpty}} The global bootstrap section still applies first, since the
 global method is empty.{{end}} Then you are done — don't invent files for empty
 layers.
@@ -57,7 +57,7 @@ then sort what you find across the five layers — this is the judgment work:
   internals, cross-repo ticket knowledge — PROPOSE lifting that into the right
   kovan layer (global / account / domain / project-private).
 - Put genuinely repo-specific, uncommitted context in ~/.kovan/projects/<repo>/.
-- Set the repo's defaults in <repo>/.kovan.yaml — worktree (prefix, base,
+- Set the repo's defaults in ~/.kovan/projects/<repo>/config.yaml — worktree (prefix, base,
   branch_template), task.dir, account, domain, mode (the default task mode;
   e.g. analyze for a notes vault, write for a blog){{if .Account}} (this repo's account is {{.Account}}){{end}}.
   Tripwire: setting account: requires the token file ~/.kovan/tokens/<acct> to

@@ -4,12 +4,14 @@ Two files, both optional. kovan runs entirely on defaults; config exists to
 override them.
 
 - `~/.kovan/config.yaml` — global: gates, accounts, apps, monitor, tmux.
-- `<repo>/.kovan.yaml` — per repo: worktree naming, task dir, account, domain,
-  default mode.
+- `~/.kovan/projects/<repo>/config.yaml` — per repo: worktree naming, task
+  dir, account, domain, default mode, board color.
 
-Both are scaffolded as fully commented templates (`kovan init` writes them;
-every line shows its default, uncomment to override). `KOVAN_HOME` moves the
-`~/.kovan` home, mostly useful for tests and experiments.
+Both live in kovan's home; the repository itself carries no kovan file, so
+every checkout and worktree sees the same settings. Both are scaffolded as
+fully commented templates (`kovan init` writes them; every line shows its
+default, uncomment to override). `KOVAN_HOME` moves the `~/.kovan` home,
+mostly useful for tests and experiments.
 
 ## ~/.kovan/config.yaml
 
@@ -28,13 +30,14 @@ every line shows its default, uncomment to override). `KOVAN_HOME` moves the
 | `accounts` | (none) | named Claude accounts, see [accounts](#accounts) |
 | `default_account` | (none) | account used when nothing else picks one |
 | `default_mode` | `code` | task mode when neither repo nor flag sets one |
-| `projects.<repo>.color` | (none) | default board stripe color for a repo's agents |
 
-## <repo>/.kovan.yaml
+## ~/.kovan/projects/<repo>/config.yaml
+
+Keyed by the repo name (the checkout's basename).
 
 | key | default | what it does |
 |---|---|---|
-| `worktree.prefix` | repo basename | worktree dir is `<prefix>-<id>`, a sibling of the repo |
+| `worktree.prefix` | repo name | worktree dir is `<prefix>-<id>`, a sibling of the repo |
 | `worktree.base` | auto (`origin/HEAD`) | base branch for new worktrees |
 | `worktree.branch_template` | `feat/{author}_{id}_{slug}` | branch naming |
 | `worktree.id_pattern` | (none) | regexp validating a typed id (a blank id still auto-generates) |
@@ -43,6 +46,7 @@ every line shows its default, uncomment to override). `KOVAN_HOME` moves the
 | `account` | (none) | default Claude account for this repo's agents |
 | `domain` | (none) | method domain layer to compose (e.g. `code`, `writing`) |
 | `mode` | (none) | default task mode for this repo |
+| `color` | (none) | default board stripe color for this repo's agents |
 | `write_paths` | (none) | extra allowed write prefixes for this repo's scoped modes (adds to the mode's own list) |
 
 ## Checking your config
@@ -62,9 +66,11 @@ grouped per file:
   (a gate action that is not `ask`/`off`, an invalid pattern regexp, an
   unknown palette color, an account without a valid token file).
 
-Report only; your files are never modified. Inside a repo it covers
-`.kovan.yaml` too. Exits `1` when something needs attention (unparseable
-file, dead keys, bad values); staleness alone is informational and exits `0`.
+Report only; your files are never modified. Inside a repo it covers that
+repo's `~/.kovan/projects/<repo>/config.yaml` too, and flags a legacy
+`.kovan.yaml` still sitting in the repo. Exits `1` when something needs
+attention (unparseable file, dead keys, bad values); staleness alone is
+informational and exits `0`.
 
 `kovan doctor --sync` brings the files up to date in place. Template
 documentation refreshes silently; every line you set is kept exactly as
@@ -192,7 +198,8 @@ write_paths: [docs/]     # carve-out: read-only everywhere, editable under docs/
 
 Posture and write paths are resolved from the files at every gate check, so
 editing them reaches running sessions immediately; a repo can add its own
-carve-outs for scoped modes with `write_paths:` in `.kovan.yaml`.
+carve-outs for scoped modes with `write_paths:` in its
+`~/.kovan/projects/<repo>/config.yaml`.
 
 ## tmux
 

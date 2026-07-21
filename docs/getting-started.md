@@ -34,7 +34,8 @@ kovan init
 ```
 
 kovan does the boring half itself: scaffolds `~/.kovan` (a fully commented
-`config.yaml`), writes a commented `.kovan.yaml` starter into the repo, and
+`config.yaml`), writes a commented per-repo starter to
+`~/.kovan/projects/<repo>/config.yaml` (the repo itself stays clean), and
 installs the hooks if you skipped `setup`. Then it launches Claude in the
 repo with one job: read your existing AI files (`CLAUDE.md`, `AGENTS.md`,
 scattered rules) and propose how they split into layers, universal rules
@@ -42,12 +43,12 @@ into the global method, private per-repo notes into the kovan store, public
 facts staying in the repo. It waits for your go before writing anything.
 
 **No AI files in the repo yet?** Then there's nothing to sort. `kovan init`
-just sets the repo's defaults in `.kovan.yaml` with you (worktree naming,
-task dir, account, domain, mode). The one extra step happens only the first
-time you ever run it, when your global method is empty: it interviews you
-about how you work and writes your first method files under
-`~/.kovan/method/global/`. After that, later repos skip straight to the
-`.kovan.yaml` defaults. No magic, nothing invented for you.
+just sets the repo's defaults in `~/.kovan/projects/<repo>/config.yaml` with
+you (worktree naming, task dir, account, domain, mode). The one extra step
+happens only the first time you ever run it, when your global method is
+empty: it interviews you about how you work and writes your first method
+files under `~/.kovan/method/global/`. After that, later repos skip straight
+to the `config.yaml` defaults. No magic, nothing invented for you.
 
 Have a repo whose rules you like? `kovan init --reference ../that-repo`
 points the onboarding at it.

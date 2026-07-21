@@ -1,5 +1,5 @@
 #!/bin/sh
-# Regenerate the README screenshots (docs/img/{method,needs-you,monitor}.png)
+# Regenerate the demo screenshots (docs/img/{board,method,needs-you,monitor}.png)
 # from the seeded demo, in iTerm2, with no manual clicking. macOS + iTerm2 only.
 #
 # It seeds the demo, opens a fixed-size iTerm2 window running the cockpit,
@@ -111,6 +111,10 @@ shot() {
 
 sleep 3 # let the cockpit load and capture the selected agent's peek
 
+# the board as it opens: ipv6 selected, its summary and peek below (board.png
+# is not in the README today, but the demo keeps it current for reuse)
+shot board
+
 # method view; move the file cursor 8 entries down (3 global files + 2 global
 # skills + account voice + 2 account skills) onto the project's context.md, so
 # the contents pane previews the repo's own notes, not the first file.
@@ -133,4 +137,4 @@ sleep 2
 shot monitor
 key S
 
-echo "done -> $IMG_DIR/{method,needs-you,monitor}.png"
+echo "done -> $IMG_DIR/{board,method,needs-you,monitor}.png"

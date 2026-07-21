@@ -25,7 +25,7 @@ so it doubles as a reset (fresh ages, fresh summaries).
 ./demo/shots.sh
 ```
 
-Regenerates `docs/img/{method,needs-you,monitor}.png` with no clicking:
+Regenerates `docs/img/{board,method,needs-you,monitor}.png` with no clicking:
 seeds the demo, opens a fixed-size iTerm2 window running the cockpit, drives
 the TUI to each state, and window-captures it (`screencapture -l`) — rounded
 transparent corners and drop shadow, no mouse cursor. **macOS + iTerm2 only**,

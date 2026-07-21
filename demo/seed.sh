@@ -52,6 +52,15 @@ make_tree() {
 	git -C "$REPOS/$1" worktree add -q "$TREES/$2" -b "$3"
 }
 
+# skill <layer-dir> <name> <description>: a SKILL.md under <layer-dir>/skills/.
+# What the method view lists as "skill: <name>" for that layer.
+skill() {
+	d="$1/skills/$2"
+	mkdir -p "$d"
+	printf -- '---\nname: %s\ndescription: %s\n---\n\n# %s\n\n%s\n' \
+		"$2" "$3" "$2" "$3" >"$d/SKILL.md"
+}
+
 # --- demo home ---------------------------------------------------------------
 printf 'demo-token-not-real\n' >"$HOME_DIR/tokens/personal"
 chmod 600 "$HOME_DIR/tokens/personal"
@@ -66,12 +75,15 @@ default_account: personal
 EOF
 
 # --- method layers (what the method view composes) ----------------------------
-mkdir -p "$HOME_DIR/method/global/skills/commit-style" \
+# The layers stack general → specific: global (every agent), account, domain,
+# per-repo private, mode, the repo's own public files, then the task docs.
+# Each layer can carry method files and skills; the demo wires the code path
+# (gecit) richly so the method view shows the full composition.
+mkdir -p "$HOME_DIR/method/global" \
 	"$HOME_DIR/method/accounts/personal" \
-	"$HOME_DIR/method/domains/code" \
 	"$HOME_DIR/method/domains/notes" \
-	"$HOME_DIR/modes/mentor" "$HOME_DIR/modes/finance" "$HOME_DIR/modes/publish" \
-	"$HOME_DIR/projects/vault"
+	"$HOME_DIR/modes/mentor" "$HOME_DIR/modes/finance" "$HOME_DIR/modes/publish" "$HOME_DIR/modes/qa" \
+	"$HOME_DIR/projects/gecit" "$HOME_DIR/projects/gobee" "$HOME_DIR/projects/bpfvet" "$HOME_DIR/projects/durdur" "$HOME_DIR/projects/quik" "$HOME_DIR/projects/website" "$HOME_DIR/projects/vault"
 
 cat >"$HOME_DIR/method/global/methodology.md" <<'EOF'
 # Methodology
@@ -91,6 +103,15 @@ Hand over the end goal, not the steps. Review what comes back before it
 lands anywhere; a sub-agent's result is a lead, not a fact.
 EOF
 
+cat >"$HOME_DIR/method/global/soul.md" <<'EOF'
+# Soul
+
+Who you are across everything: a systems engineer who likes small, sharp
+tools. Practical over trendy. Honest about trade-offs. One binary, one
+command, no config files where you can help it.
+EOF
+
+mkdir -p "$HOME_DIR/method/global/skills/commit-style"
 cat >"$HOME_DIR/method/global/skills/commit-style/SKILL.md" <<'EOF'
 ---
 name: commit-style
@@ -103,6 +124,9 @@ description: Conventional commits, single line, imperative mood
 no trailing period, one line for routine commits.
 EOF
 
+skill "$HOME_DIR/method/global" spec-writing \
+	"Write the spec before code: plan, tasks, open questions; get a go first"
+
 cat >"$HOME_DIR/method/accounts/personal/voice.md" <<'EOF'
 # Personal account
 
@@ -110,12 +134,77 @@ Open-source voice: direct, technical, no marketing words. English for
 anything public.
 EOF
 
-cat >"$HOME_DIR/method/domains/code/code.md" <<'EOF'
-# Code domain
+skill "$HOME_DIR/method/accounts/personal" oss-triage \
+	"Triage an incoming issue: reproduce, label, ask for the missing detail"
+skill "$HOME_DIR/method/accounts/personal" release-notes \
+	"Cut release notes from the merged PRs since the last tag"
 
-The suite is green before a task is called done. Format with the language's
-standard tooling. Branches follow the repo's template; commits are
-conventional.
+# project (private) layer for gecit — the code path the method view showcases:
+# the repo's private notes plus repo-specific skills, from a different source
+# than the global and account layers above.
+cat >"$HOME_DIR/projects/gecit/context.md" <<'EOF'
+# gecit — private notes
+
+Not committed to the repo. The BPF objects are prebuilt into internal/bpf/;
+regenerate them with the build skill, never by hand. The verifier is the
+real reviewer — if a program grows past what it proves, split the function,
+don't fight the checker.
+EOF
+
+skill "$HOME_DIR/projects/gecit" bpf-build \
+	"Rebuild the BPF objects with clang and vendor them into internal/bpf/"
+skill "$HOME_DIR/projects/gecit" verifier-debug \
+	"Read a verifier rejection: find the lost range, trace it to the branch"
+skill "$HOME_DIR/projects/gecit" flow-trace \
+	"Trace a packet through the sock_ops path with bpftrace"
+skill "$HOME_DIR/projects/gecit" xdp-bench \
+	"Benchmark the datapath: pps and p99 latency against the baseline"
+
+cat >"$HOME_DIR/projects/gobee/context.md" <<'EOF'
+# gobee — private notes
+
+The verifier is the oracle. When generated code is rejected, reduce to the
+smallest failing program and read the verifier log top-down; the first lost
+range is the bug, not the last.
+EOF
+
+skill "$HOME_DIR/projects/gobee" codegen-reduce \
+	"Reduce a rejected program to the smallest shape that still fails"
+skill "$HOME_DIR/projects/gobee" verifier-log \
+	"Read a kernel verifier log: map the rejection back to the emitted insn"
+
+cat >"$HOME_DIR/projects/bpfvet/context.md" <<'EOF'
+# bpfvet — private notes
+
+Every check ships with a passing and a failing fixture under testdata/.
+Never loosen a check to make a real program pass; fix the program or the
+check's model of the rule.
+EOF
+
+skill "$HOME_DIR/projects/bpfvet" check-fixture \
+	"Add a check with its passing and failing fixtures"
+
+cat >"$HOME_DIR/projects/durdur/context.md" <<'EOF'
+# durdur — private notes
+
+Policy-map versioning: bump the version byte and add a loader path, never
+edit the existing map shape. A running host reloads the policy live, so a
+bad layout takes the firewall down.
+EOF
+
+cat >"$HOME_DIR/projects/quik/context.md" <<'EOF'
+# quik — private notes
+
+pion is pinned in go.mod; a bump touches the SDP munging in signal.go. Revive
+the demo room after any bump and watch for a renegotiation loop.
+EOF
+
+cat >"$HOME_DIR/projects/website/context.md" <<'EOF'
+# website — private notes
+
+Posts live under content/posts/, assets under static/img/ (resized to
+1600px on the way in). The publish step is manual on purpose: staging is
+safe, live is not.
 EOF
 
 cat >"$HOME_DIR/method/domains/notes/notes.md" <<'EOF'
@@ -153,23 +242,41 @@ Prepare everything, publish nothing. Stage the post, resize the assets,
 write the captions, then stop for a go before anything is live.
 EOF
 
+cat >"$HOME_DIR/modes/qa/method.md" <<'EOF'
+# QA method
+
+Run the real thing, don't reason about it. Every check is a command and its
+observed result: pass, fail, or blocked. Report the matrix; never fix from
+inside the QA run.
+EOF
+
 # --- repos and worktrees -----------------------------------------------------
 for repo in gecit gobee bpfvet durdur quik vault website; do
 	make_repo "$repo"
 done
 
-# Public method + domain wiring for the repos the method view showcases:
-# AGENTS.md is the project (public) layer, .kovan.yaml selects the domain.
-cat >"$REPOS/gecit/AGENTS.md" <<'EOF'
+# Public method + domain wiring for the repos the method view showcases: the
+# repo's own committed method files are the project (public) layer, .kovan.yaml
+# selects the domain. gecit's CLAUDE.md @imports docs/AGENTS.md, so the method
+# view shows the import nested under it (the ↳ in the public layer).
+mkdir -p "$REPOS/gecit/docs"
+cat >"$REPOS/gecit/CLAUDE.md" <<'EOF'
 # gecit
 
-A network tool in Go. eBPF programs live under bpf/, the loader under
-internal/. The verifier is the reviewer that matters: keep programs simple
-enough to pass it.
+A network tool in Go. This file is the entry point the agent always loads;
+the architecture detail lives in the imported doc.
+
+@docs/AGENTS.md
+EOF
+cat >"$REPOS/gecit/docs/AGENTS.md" <<'EOF'
+# gecit — architecture
+
+eBPF programs live under bpf/, the loader under internal/. The verifier is
+the reviewer that matters: keep programs simple enough to pass it.
 EOF
 printf 'domain: code\n' >"$REPOS/gecit/.kovan.yaml"
-demo_git -C "$REPOS/gecit" add AGENTS.md .kovan.yaml
-demo_git -C "$REPOS/gecit" commit -qm "docs: agents and kovan config"
+demo_git -C "$REPOS/gecit" add CLAUDE.md docs/AGENTS.md .kovan.yaml
+demo_git -C "$REPOS/gecit" commit -qm "docs: claude entry, agents, kovan config"
 
 cat >"$REPOS/vault/AGENTS.md" <<'EOF'
 # vault
@@ -180,6 +287,58 @@ EOF
 printf 'domain: notes\n' >"$REPOS/vault/.kovan.yaml"
 demo_git -C "$REPOS/vault" add AGENTS.md .kovan.yaml
 demo_git -C "$REPOS/vault" commit -qm "docs: agents and kovan config"
+
+# The remaining repos each get a public AGENTS.md and a domain, so every
+# agent's method view has a project (public) layer, not just gecit and vault.
+pub() { # pub <repo> <domain>: commit the AGENTS.md already written + a domain.
+	printf 'domain: %s\n' "$2" >"$REPOS/$1/.kovan.yaml"
+	demo_git -C "$REPOS/$1" add AGENTS.md .kovan.yaml
+	demo_git -C "$REPOS/$1" commit -qm "docs: agents and kovan config"
+}
+
+cat >"$REPOS/gobee/AGENTS.md" <<'EOF'
+# gobee
+
+A BPF codegen library in Go: it emits eBPF bytecode that must pass the kernel
+verifier. Correctness is the verifier's verdict — if generated code is
+rejected, the bug is in codegen, not the program.
+EOF
+pub gobee code
+
+cat >"$REPOS/bpfvet/AGENTS.md" <<'EOF'
+# bpfvet
+
+A static analyzer for BPF objects: it reports what a program needs and where
+it breaks the rules. Every finding carries a file:line pointer; a finding you
+can't locate is not a finding.
+EOF
+pub bpfvet code
+
+cat >"$REPOS/durdur/AGENTS.md" <<'EOF'
+# durdur
+
+An eBPF firewall. Rules compile to a policy map the datapath enforces. Never
+change the map layout without a migration path; a running host reloads it
+live.
+EOF
+pub durdur code
+
+cat >"$REPOS/quik/AGENTS.md" <<'EOF'
+# quik
+
+A WebRTC library over pion. The demo room is the integration test: if it
+connects and streams, the stack is healthy. pion is pinned, bumps are
+deliberate.
+EOF
+pub quik code
+
+cat >"$REPOS/website/AGENTS.md" <<'EOF'
+# website
+
+A static site. Posts are markdown, assets are resized on the way in. Nothing
+goes live without a human go: publishing is the last, explicit step.
+EOF
+pub website notes
 
 make_tree gecit ipv6 feat/ipv6-sock-ops
 make_tree gobee mapiter fix/map-iteration-verifier
@@ -450,7 +609,14 @@ EOF
 
 # --- task docs (the method view's task layer) --------------------------------
 mkdir -p "$HOME_DIR/projects/gecit/works/ipv6" \
+	"$HOME_DIR/projects/gecit/works/tun-qa" \
+	"$HOME_DIR/projects/gobee/works/mapiter" \
+	"$HOME_DIR/projects/gobee/works/o2" \
 	"$HOME_DIR/projects/bpfvet/works/featreq" \
+	"$HOME_DIR/projects/durdur/works/relnotes" \
+	"$HOME_DIR/projects/quik/works/pion" \
+	"$HOME_DIR/projects/website/works/photos" \
+	"$HOME_DIR/projects/vault/works/weekly" \
 	"$HOME_DIR/projects/vault/works/budget"
 
 cat >"$HOME_DIR/projects/gecit/works/ipv6/context.md" <<'EOF'
@@ -486,6 +652,34 @@ cat >"$HOME_DIR/projects/gecit/works/ipv6/learnings.md" <<'EOF'
 - The verifier needs the address-family branch to stay in one function;
   splitting it into a helper loses the range it proved on the packet
   pointer.
+EOF
+
+cat >"$HOME_DIR/projects/gecit/works/ipv6/spec.md" <<'EOF'
+# ipv6 — spec
+
+## Plan
+
+Add IPv6 tuple extraction to the sock_ops path and wire it into the redirect
+map, leaving the IPv4 fast path untouched.
+
+## Tasks
+
+- [x] Extend the tuple struct with the v6 addresses.
+- [x] Extract the family at runtime, no v4-mapped special case.
+- [ ] Wire the redirect map lookup.
+- [ ] Integration matrix across v4, v6, dual-stack.
+
+## Open questions
+
+- None outstanding; the map-key growth was approved.
+EOF
+
+cat >"$HOME_DIR/projects/gecit/works/ipv6/test-plan.md" <<'EOF'
+# ipv6 — test plan
+
+- Unit: tuple extraction for v4, v6, and dual-stack sockets.
+- Verifier: the extraction function passes with the range preserved.
+- Integration: a v6 flow takes the redirect fast path end to end.
 EOF
 
 cat >"$HOME_DIR/projects/bpfvet/works/featreq/context.md" <<'EOF'
@@ -533,6 +727,168 @@ with anything that looks unused flagged.
 
 Report drafted. One flagged subscription needs a keep-or-cancel call, then
 the report is final.
+EOF
+
+# Task docs for the rest of the active agents, so every agent's task layer
+# has content (the mode's own docs: spec/test-plan for code, review.md for a
+# review, analysis.md for analyze, draft.md for write).
+cat >"$HOME_DIR/projects/gobee/works/mapiter/context.md" <<'EOF'
+# mapiter — fix verifier rejection on map iteration
+
+## Summary
+
+The verifier rejects the generated map-iteration loop: it loses the proven
+bound on the iterator, so the array access reads as unbounded. Reshape the
+codegen so the bound survives.
+
+## Decisions
+
+- Two candidates on the table: a bounded-loop rewrite and a callback form.
+  Waiting on a pick before implementing.
+
+## Status
+
+Rejection reproduced with a minimal program. Both codegen shapes sketched;
+needs a decision.
+EOF
+
+cat >"$HOME_DIR/projects/gobee/works/mapiter/spec.md" <<'EOF'
+# mapiter — spec
+
+## Plan
+
+Emit the map iteration so the verifier keeps the iterator's range across the
+loop body, without changing the public codegen API.
+
+## Tasks
+
+- [x] Reproduce the rejection with a minimal program.
+- [ ] Pick the loop shape (bounded rewrite vs callback).
+- [ ] Regenerate the corpus and re-run the verifier suite.
+
+## Open questions
+
+- Bounded rewrite keeps one function; the callback form is smaller but adds
+  an indirect call. Which do you want?
+EOF
+
+cat >"$HOME_DIR/projects/gobee/works/o2/context.md" <<'EOF'
+# o2 — why -O2 output fails the verifier
+
+## Summary
+
+At -O2 the compiler spills a bounds-checked register, so the verifier loses
+the proven range and rejects the later access. Explain exactly where, with
+instruction-level evidence. Analysis only, no code changes.
+
+## Status
+
+Answered in analysis.md with the spill site and the lost-range chain. Idle.
+EOF
+
+cat >"$HOME_DIR/projects/gobee/works/o2/analysis.md" <<'EOF'
+# o2 — analysis
+
+The bound is proven at the compare, then the register is spilled to the
+stack across a call and reloaded without the range. The verifier treats the
+reload as unbounded, so the map access fails.
+
+- codegen/emit.go:212 — the compare that proves the range
+- codegen/emit.go:240 — the spill that drops it
+
+Fix direction (out of scope here): pin the checked value in a callee-saved
+register, or re-prove the bound after the reload.
+EOF
+
+cat >"$HOME_DIR/projects/gecit/works/tun-qa/context.md" <<'EOF'
+# tun-qa — verify TUN device setup on macOS
+
+## Summary
+
+Run the TUN setup matrix on macOS: device create, address assign, route
+install, teardown, and a re-create after an unclean exit. Report pass/fail
+per step with the commands used.
+
+## Status
+
+Three of five green. Route install and teardown still to run.
+EOF
+
+cat >"$HOME_DIR/projects/durdur/works/relnotes/context.md" <<'EOF'
+# relnotes — draft release notes for v0.2
+
+## Summary
+
+Draft the v0.2 release notes from the merged PRs since v0.1: group by
+feature/fix, lead with the policy-map migration, keep the voice plain.
+
+## Status
+
+Draft ready in draft.md. Needs a voice check on the opening before it's
+final.
+EOF
+
+cat >"$HOME_DIR/projects/durdur/works/relnotes/draft.md" <<'EOF'
+# durdur v0.2
+
+The big one is live policy reloads: durdur now swaps its rule map without
+dropping the datapath, so a ruleset change no longer blips the firewall.
+
+- feat: live policy-map reload with a versioned layout
+- feat: per-rule counters exposed on the status socket
+- fix: teardown left a dangling qdisc on an unclean exit
+EOF
+
+cat >"$HOME_DIR/projects/quik/works/pion/context.md" <<'EOF'
+# pion — spike: bump pion, revive the demo room
+
+## Summary
+
+Scope a pion bump: what breaks in the SDP munging, and whether the demo room
+still connects after. A spike, not a merge — map the work, don't land it.
+
+## Status
+
+API changes mapped, upgrade path sketched. Stopped before touching signal.go.
+EOF
+
+cat >"$HOME_DIR/projects/website/works/photos/context.md" <<'EOF'
+# photos — photo post: pick, caption, publish
+
+## Summary
+
+Build a photo post: shortlist the shots, resize to the site's max width,
+write captions, stage the post. Stop before publishing.
+
+## Status
+
+Resizing the shortlist. Captions and staging next; nothing goes live without
+a go.
+EOF
+
+cat >"$HOME_DIR/projects/vault/works/weekly/context.md" <<'EOF'
+# weekly — weekly review
+
+## Summary
+
+Read the week's notes and leave a dated check-in: what moved, what stalled,
+a pattern or two. Observations, not advice. Write only under mentor/.
+
+## Status
+
+Check-in written for the week. Idle.
+EOF
+
+cat >"$HOME_DIR/projects/bpfvet/works/featreq/review.md" <<'EOF'
+# featreq — review findings
+
+| # | severity | location | finding |
+|---|---|---|---|
+| 1 | medium | internal/extract/requirements.go:88 | a tail-call target's features are not folded into the caller's set |
+| 2 | medium | internal/extract/requirements.go:140 | map-in-map inner features are missed |
+| 3 | low | internal/extract/requirements.go:31 | helper id reported without the program section |
+
+Findings only, no patches. Waiting to discuss before anything is posted.
 EOF
 
 # --- pane tails + dummy tmux sessions -----------------------------------------

@@ -640,6 +640,41 @@ func TestMethodViewFills(t *testing.T) {
 	}
 }
 
+// TestMethodViewLongListScrolls: when the layer list is taller than its share,
+// the contents pane still keeps at least a quarter of the screen, the view
+// fills exactly, and the clipped list shows a scroll marker.
+func TestMethodViewLongListScrolls(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(f, []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// One layer with far more files than the terminal is tall.
+	files := make([]method.File, 40)
+	for i := range files {
+		files[i] = method.File{Path: f}
+	}
+	m := testModel(modeMethod, nil)
+	m.mctx = methodCtx{repo: "kovan"}
+	m.methodLayers = []method.Layer{{Name: "global", Files: files}}
+	m.methodFile = 30 // deep in the list, so the window scrolls
+	m.methodVP = viewport.New(80, 6)
+	m.loadMethodFile()
+	m.sizeMethodViewport()
+
+	avail := m.height - 4
+	if m.methodVP.Height < avail/4 {
+		t.Errorf("contents = %d lines, want at least a quarter (%d)", m.methodVP.Height, avail/4)
+	}
+	v := m.methodView()
+	if got := strings.Count(v, "\n") + 1; got != m.height {
+		t.Errorf("method view = %d lines, want %d (exact fill)", got, m.height)
+	}
+	if !strings.Contains(v, "more") {
+		t.Error("a clipped list should show a scroll marker")
+	}
+}
+
 // TestMethodCursorReachesSkills: the cursor walks past method files onto a
 // layer's skills, focusing the skill's SKILL.md so e/E edits it.
 func TestMethodCursorReachesSkills(t *testing.T) {

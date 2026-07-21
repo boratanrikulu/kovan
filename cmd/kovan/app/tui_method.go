@@ -205,11 +205,13 @@ func (m model) methodView() string {
 		"domain: " + orNone(m.mctx.domain),
 		"repo: " + m.mctx.repo,
 	}, " · ")
-	// header / layer list / contents rule / contents (fills) / status / help —
-	// the same top-fills, bottom-pinned shape as the board's peek panel.
+	// header / layer list / contents rule / contents / status / help. The list
+	// is capped so the contents pane always keeps at least a quarter of the
+	// screen; a long list scrolls around the focused file within its cap.
+	listH, _ := m.methodPanelHeights()
 	return strings.Join([]string{
 		brandHeader(context),
-		m.methodList(),
+		m.methodListView(listH),
 		rule("contents", m.width),
 		m.methodVP.View(),
 		m.methodStatusLine(),
@@ -217,40 +219,67 @@ func (m model) methodView() string {
 	}, "\n")
 }
 
-// sizeMethodViewport grows the contents pane to fill everything below the layer
-// list, down to the pinned status + help lines — so the contents read like the
-// board's peek (no dead space, status at the very bottom) but larger, since
-// reading the focused file is the point.
+// methodPanelHeights splits the space below the header between the layer list
+// and the contents pane. The contents pane is guaranteed at least a quarter of
+// that space (reading the focused file is the point); the list takes what it
+// needs up to the rest and scrolls when it overflows.
+func (m model) methodPanelHeights() (listH, contentsH int) {
+	avail := m.height - 4 // header, contents rule, status, help
+	if avail < 2 {
+		return 1, 1
+	}
+	floor := avail / 4
+	if floor < 3 {
+		floor = 3
+	}
+	if floor > avail-1 {
+		floor = avail - 1
+	}
+	lines, _ := m.methodListLines()
+	listH = len(lines)
+	if maxList := avail - floor; listH > maxList {
+		listH = maxList
+	}
+	if listH < 1 {
+		listH = 1
+	}
+	contentsH = avail - listH
+	if contentsH < 1 {
+		contentsH = 1
+	}
+	return listH, contentsH
+}
+
+// sizeMethodViewport sizes the contents pane to its share of the split, so the
+// contents read like the board's peek (status pinned at the very bottom) with
+// a guaranteed minimum height even under a long layer list.
 func (m *model) sizeMethodViewport() {
 	if !m.ready {
 		return
 	}
-	listLines := strings.Count(m.methodList(), "\n") + 1
-	// header(1) + list + contents-rule(1) + status(1) + help(1).
-	h := m.height - listLines - 4
-	if h < 1 {
-		h = 1
-	}
-	m.methodVP.Width, m.methodVP.Height = m.width, h
+	_, contentsH := m.methodPanelHeights()
+	m.methodVP.Width, m.methodVP.Height = m.width, contentsH
 }
 
-// methodList renders the layers as blue headers (the board's column-header role)
-// with their files indented, the focused entry highlighted and empty layers (none).
-func (m model) methodList() string {
-	var b strings.Builder
+// methodListLines renders every layer line (headers, files, skills, gates) and
+// reports the line the file cursor sits on, so the view can window a long list
+// around it.
+func (m model) methodListLines() (lines []string, cursorLine int) {
+	cursorLine = -1
 	idx := 0
 	emit := func(label string) {
 		if idx == m.methodFile {
+			cursorLine = len(lines)
 			label = cursorStyle.Render(label)
 		}
-		b.WriteString(label + "\n")
+		lines = append(lines, label)
 		idx++
 	}
 	for _, l := range m.methodLayers {
 		// Layer headers share the board's column-header role.
-		b.WriteString(headerStyle.Render(l.Name+":") + "\n")
+		lines = append(lines, headerStyle.Render(l.Name+":"))
 		if len(l.Files) == 0 && len(l.Skills) == 0 {
-			b.WriteString("    " + dimStyle.Render("(none)") + "\n")
+			lines = append(lines, "    "+dimStyle.Render("(none)"))
 			continue
 		}
 		for _, f := range l.Files {
@@ -263,12 +292,35 @@ func (m model) methodList() string {
 	// Gates govern the agent too, so the inspector shows them — informational, not
 	// part of the file cursor.
 	if len(m.methodGates) > 0 {
-		b.WriteString(headerStyle.Render("gates:") + "\n")
+		lines = append(lines, headerStyle.Render("gates:"))
 		for _, g := range m.methodGates {
-			b.WriteString("    " + dimStyle.Render(g) + "\n")
+			lines = append(lines, "    "+dimStyle.Render(g))
 		}
 	}
-	return strings.TrimRight(b.String(), "\n")
+	if cursorLine < 0 {
+		cursorLine = 0
+	}
+	return lines, cursorLine
+}
+
+// methodListView renders the layer list to exactly height lines, windowed
+// around the file cursor when the full list is taller. A clipped edge shows a
+// dim "↑/↓ more" marker so it reads as scrollable.
+func (m model) methodListView(height int) string {
+	lines, cursor := m.methodListLines()
+	if height >= len(lines) {
+		return strings.Join(lines, "\n")
+	}
+	start := windowStart(cursor, len(lines), height)
+	win := make([]string, height)
+	copy(win, lines[start:start+height])
+	if start > 0 {
+		win[0] = dimStyle.Render("  ↑ more")
+	}
+	if start+height < len(lines) {
+		win[height-1] = dimStyle.Render("  ↓ more")
+	}
+	return strings.Join(win, "\n")
 }
 
 // methodFileLabel indents a method file by its import depth: directly-listed

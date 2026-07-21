@@ -19,20 +19,43 @@ look before opening the cockpit.
 Re-running `seed.sh` is always safe: it tears the previous demo down first,
 so it doubles as a reset (fresh ages, fresh summaries).
 
-## The shots
+## The README screenshots, automated
 
-All from that one cockpit:
+```sh
+./demo/shots.sh
+```
 
-- **Board**: it opens on it. `j/k` picks which agent's summary and peek
-  show below the list.
+Regenerates `docs/img/{method,needs-you,monitor}.png` with no clicking:
+seeds the demo, opens a fixed-size iTerm2 window running the cockpit, drives
+the TUI to each state, and window-captures it (`screencapture -l`) — rounded
+transparent corners and drop shadow, no mouse cursor. **macOS + iTerm2 only**,
+and the terminal running it needs Screen Recording permission (System
+Settings › Privacy & Security › Screen Recording) or the grabs come out
+empty.
+
+Leave the mouse off the window while it runs: the board has hover-select, so
+a stray pointer over a row moves the selection and the method shot lands on
+the wrong agent.
+
+Tunables (env): `KOVAN_SHOT_COLS`/`KOVAN_SHOT_ROWS` (window size; the
+`127`×`36` default matches the committed images — set once for your font),
+`KOVAN_SHOT_PROFILE` (iTerm2 profile, default `Default`),
+`KOVAN_SHOT_TEARDOWN=1` (remove the demo after).
+
+## The shots, by hand
+
+All from that one cockpit (what `shots.sh` automates):
+
+- **Board / needs-you**: it opens on the board; `j` selects `mapiter`, whose
+  row is `needs-you`. `j/k` picks which agent's summary and peek show below.
 - **Summaries**: `S`. Every running agent with its full summary.
+- **Method manager**: cursor on `ipv6`, then `m`. That agent composes every
+  layer: global (files plus skills), account, domain, project-private, the
+  `code` mode, the repo's public `CLAUDE.md` (which imports `docs/AGENTS.md`),
+  and the task docs. `budget` is the non-code (`finance`) variant.
 - **Create form**: `n`. Pre-filled for the current repo; type a title to
   make it look mid-use. Do not submit (`ctrl+d`), that would spawn a real
   agent in the demo repo.
-- **Method manager**: cursor on `budget`, then `m`. That agent composes
-  every layer: global (files plus a skill), account, domain, project-private,
-  a custom mode (`finance`), the repo's public `AGENTS.md`, and the task
-  docs. `ipv6` is the code-domain variant.
 
 Plain-text check without the TUI:
 

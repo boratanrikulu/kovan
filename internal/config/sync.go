@@ -10,7 +10,7 @@ func SyncGlobal(data []byte, remove map[string]bool) []byte {
 	return syncFile(data, globalTemplate, schemaOf(Global{}), remove)
 }
 
-// SyncRepo rewrites a <repo>/.kovan.yaml the same way.
+// SyncRepo rewrites a repo's ~/.kovan/projects/<repo>/config.yaml the same way.
 func SyncRepo(data []byte, remove map[string]bool) []byte {
 	return syncFile(data, repoTemplate, schemaOf(Repo{}), remove)
 }

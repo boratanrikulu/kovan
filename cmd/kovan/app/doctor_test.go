@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,9 +80,6 @@ func TestDoctorValueFindings(t *testing.T) {
 	home := doctorHome(t)
 	cfg := `default_account: ghost
 default_mode: nosuchmode
-projects:
-  kovan:
-    color: pink
 gates:
   patterns:
     - match: "([unclosed"
@@ -102,7 +100,6 @@ gates:
 	for _, want := range []string{
 		`default_account: "ghost"`,
 		`default_mode: "nosuchmode"`,
-		`projects.kovan.color: "pink"`,
 		"gates.patterns[0].match",
 		"gates.patterns[0].action",
 	} {
@@ -238,5 +235,69 @@ func TestDoctorSyncInSyncFileUntouched(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
 		t.Errorf("backup written although nothing changed")
+	}
+}
+
+func TestRepoValueFindingsColor(t *testing.T) {
+	home := t.TempDir()
+	r := &config.Repo{Color: "pink"}
+	found := repoValueFindings(r, nil, home)
+	if len(found) != 1 || !strings.Contains(found[0].Path, `color: "pink"`) {
+		t.Fatalf("findings = %+v; want exactly the bad color", found)
+	}
+	r.Color = "cyan"
+	if found := repoValueFindings(r, nil, home); len(found) != 0 {
+		t.Fatalf("valid color flagged: %+v", found)
+	}
+}
+
+// doctorRepoDir puts the test inside a fresh git repo so the repo section of
+// the report is in scope.
+func doctorRepoDir(t *testing.T) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "myrepo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	t.Chdir(repo)
+	return repo
+}
+
+func TestDoctorRepoChecksHomeConfig(t *testing.T) {
+	home := doctorHome(t)
+	doctorRepoDir(t)
+	var out strings.Builder
+	clean, err := runDoctor(&out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !clean {
+		t.Fatalf("clean = false:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), config.RepoConfigPath(home, "myrepo")) {
+		t.Errorf("repo section does not report the home config path:\n%s", out.String())
+	}
+}
+
+func TestDoctorFlagsLegacyRepoFile(t *testing.T) {
+	home := doctorHome(t)
+	repo := doctorRepoDir(t)
+	if err := os.WriteFile(filepath.Join(repo, ".kovan.yaml"), []byte("domain: code\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	clean, err := runDoctor(&out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean {
+		t.Fatal("clean = true; a legacy .kovan.yaml must dirty the report")
+	}
+	got := out.String()
+	if !strings.Contains(got, "no longer read; move its settings to "+config.RepoConfigPath(home, "myrepo")) {
+		t.Errorf("output misses the legacy warning:\n%s", got)
 	}
 }

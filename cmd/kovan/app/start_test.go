@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/mode"
 	"github.com/boratanrikulu/kovan/internal/session"
 )
@@ -56,8 +57,8 @@ func TestOpeningPrompt(t *testing.T) {
 }
 
 // TestScaffoldColorDefaults exercises the stripe-color resolution at scaffold
-// time: an explicit choice wins, the repo's default from ~/.kovan/config.yaml
-// fills an empty one, and no config means no color. Skipped without git.
+// time: an explicit choice wins, the repo config's color fills an empty one,
+// and no config means no color. Skipped without git.
 func TestScaffoldColorDefaults(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -99,8 +100,10 @@ func TestScaffoldColorDefaults(t *testing.T) {
 		t.Errorf("no config, no choice = %q, want empty", got)
 	}
 
-	cfg := "projects:\n  myrepo:\n    color: yellow\n"
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(cfg), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "projects", "myrepo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.RepoConfigPath(home, "myrepo"), []byte("color: yellow\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got := scaffold("c3", ""); got != "yellow" {

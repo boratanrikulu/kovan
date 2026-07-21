@@ -33,15 +33,15 @@ func runTaskNew(id, title string) error {
 	if err != nil {
 		return err
 	}
-	repoCfg, err := config.LoadRepo(repo.Root)
-	if err != nil {
-		return err
-	}
 	global, err := config.LoadGlobal()
 	if err != nil {
 		return err
 	}
 	home, err := config.Dir()
+	if err != nil {
+		return err
+	}
+	repoCfg, err := config.LoadRepo(home, filepath.Base(repo.Root))
 	if err != nil {
 		return err
 	}

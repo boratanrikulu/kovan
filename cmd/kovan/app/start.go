@@ -180,11 +180,12 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 	if err != nil {
 		return nil, err
 	}
-	repoCfg, err := config.LoadRepo(repo.Root)
+	home, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
-	home, err := config.Dir()
+	repoName := filepath.Base(repo.Root)
+	repoCfg, err := config.LoadRepo(home, repoName)
 	if err != nil {
 		return nil, err
 	}
@@ -213,13 +214,11 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 		return nil, err
 	}
 
-	repoName := filepath.Base(repo.Root)
-
-	// The stripe color: an explicit choice wins, else the repo's default from
-	// ~/.kovan/config.yaml. An unknown name is kept as-is and simply draws no
-	// stripe, so a config typo never blocks a spawn.
+	// The stripe color: an explicit choice wins, else the repo's default. An
+	// unknown name is kept as-is and simply draws no stripe, so a config typo
+	// never blocks a spawn.
 	if color == "" {
-		color = global.Projects[repoName].Color
+		color = repoCfg.Color
 	}
 
 	// The primary checkout is a workspace like any other: if a live agent already

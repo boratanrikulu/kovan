@@ -1,6 +1,6 @@
-// Package config loads kovan's two configuration layers: the global method
-// config under ~/.kovan and the per-repository .kovan.yaml. Both are optional;
-// every field falls back to a sane default.
+// Package config loads kovan's two configuration layers, both under ~/.kovan:
+// the global config.yaml and the per-repository projects/<repo>/config.yaml.
+// Both are optional; every field falls back to a sane default.
 package config
 
 import (
@@ -25,13 +25,6 @@ type Global struct {
 	Accounts       map[string]Account `yaml:"accounts"`
 	DefaultAccount string             `yaml:"default_account"`
 	DefaultMode    string             `yaml:"default_mode"` // task mode when neither repo nor command sets one
-	Projects       map[string]Project `yaml:"projects"`     // per-repo defaults, keyed by the repo name
-}
-
-// Project is a repo's defaults kept in kovan's own settings, applied to new
-// agents in that repo unless the start overrides them.
-type Project struct {
-	Color string `yaml:"color"` // default board stripe color, a palette name
 }
 
 // Monitor configures the cockpit's agent summaries: the model the one-shot
@@ -86,13 +79,17 @@ type Pattern struct {
 	Reason string `yaml:"reason"` // shown to the user on a match
 }
 
-// Repo is the per-repository config, read from <repo>/.kovan.yaml.
+// Repo is a repository's kovan settings, read from
+// ~/.kovan/projects/<repo>/config.yaml — the repo's private home. Nothing
+// lives in the repository itself, so every worktree and every checkout sees
+// the same settings.
 type Repo struct {
 	Worktree   Worktree `yaml:"worktree"`
 	Task       Task     `yaml:"task"`
 	Account    string   `yaml:"account"`     // default account for agents in this repo
 	Domain     string   `yaml:"domain"`      // method domain (code/writing/…) for this repo
 	Mode       string   `yaml:"mode"`        // default task mode (code/review/…) for this repo
+	Color      string   `yaml:"color"`       // default board stripe color, a palette name
 	WritePaths []string `yaml:"write_paths"` // extra allowed write prefixes for scoped modes in this repo
 }
 
@@ -188,15 +185,22 @@ func expandTilde(path string) string {
 	return path
 }
 
-// LoadRepo reads <root>/.kovan.yaml, applying defaults for anything unset.
-// Worktree.Base is left empty when unset so the caller can autodetect it.
-func LoadRepo(root string) (*Repo, error) {
+// RepoConfigPath is where a repository's kovan settings live, keyed by the
+// repo name (the checkout's basename).
+func RepoConfigPath(home, repo string) string {
+	return filepath.Join(home, "projects", repo, "config.yaml")
+}
+
+// LoadRepo reads ~/.kovan/projects/<repo>/config.yaml, applying defaults for
+// anything unset. Worktree.Base is left empty when unset so the caller can
+// autodetect it.
+func LoadRepo(home, repo string) (*Repo, error) {
 	r := &Repo{}
-	if err := readYAML(filepath.Join(root, ".kovan.yaml"), r); err != nil {
+	if err := readYAML(RepoConfigPath(home, repo), r); err != nil {
 		return nil, err
 	}
 	if r.Worktree.Prefix == "" {
-		r.Worktree.Prefix = filepath.Base(root)
+		r.Worktree.Prefix = repo
 	}
 	if r.Worktree.BranchTemplate == "" {
 		r.Worktree.BranchTemplate = "feat/{author}_{id}_{slug}"
@@ -244,11 +248,6 @@ const globalTemplate = `# kovan's own settings. Every line below is commented: t
 # monitor:                # the cockpit's per-agent summaries (board strip + S page)
 #   model: opus           # model the claude -p summarizer uses (opus/sonnet/haiku)
 
-# projects:               # per-repo board defaults, keyed by repo name
-#   kovan:
-#     color: cyan         # stripe color for this repo's agents
-#                         # (red/orange/yellow/green/cyan/blue/magenta/grey)
-
 # accounts:               # Claude accounts an agent can run under
 #   personal:
 #     token_file: ~/.kovan/tokens/personal   # claude setup-token, then chmod 600
@@ -257,10 +256,12 @@ const globalTemplate = `# kovan's own settings. Every line below is commented: t
 # default_mode: code      # task mode when neither the repo nor the command sets one
 `
 
-// repoTemplate is a fully-commented <repo>/.kovan.yaml starter: documentation
-// only. Same rule as globalTemplate — LoadRepo owns the defaults.
-const repoTemplate = `# Per-repository kovan config. Every line is commented; omit the file entirely
-# and these defaults apply.
+// repoTemplate is a fully-commented ~/.kovan/projects/<repo>/config.yaml
+// starter: documentation only. Same rule as globalTemplate — LoadRepo owns the
+// defaults.
+const repoTemplate = `# This repository's kovan settings. Every line is commented; omit the file
+# entirely and these defaults apply. The repository itself stays clean: this
+# file lives in kovan's home, so every checkout and worktree sees it.
 
 # worktree:
 #   prefix: agent                       # worktree dir = <prefix>-<id>; default: repo basename
@@ -275,6 +276,8 @@ const repoTemplate = `# Per-repository kovan config. Every line is commented; om
 # account: company                      # default Claude account for agents in this repo
 # domain: code                          # method domain layer (code/writing/…) to compose
 # mode: code                            # default task mode (code/review/analyze/write) for this repo
+# color: cyan                           # default board stripe color for this repo's agents
+#                                       # (red/orange/yellow/green/cyan/blue/magenta/grey)
 
 # write_paths:                          # extra allowed write prefixes (worktree-relative) for this
 #   - Daily/                            # repo's scoped modes; adds to the mode's own write_paths,
@@ -287,10 +290,10 @@ func ScaffoldGlobal(home string) error {
 	return scaffoldFile(filepath.Join(home, "config.yaml"), globalTemplate)
 }
 
-// ScaffoldRepo writes a commented <root>/.kovan.yaml starter if absent. It never
-// clobbers an existing file.
-func ScaffoldRepo(root string) error {
-	return scaffoldFile(filepath.Join(root, ".kovan.yaml"), repoTemplate)
+// ScaffoldRepo writes a commented ~/.kovan/projects/<repo>/config.yaml starter
+// if absent. It never clobbers an existing file.
+func ScaffoldRepo(home, repo string) error {
+	return scaffoldFile(RepoConfigPath(home, repo), repoTemplate)
 }
 
 // scaffoldFile writes content to path only when path does not already exist.

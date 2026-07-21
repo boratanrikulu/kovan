@@ -29,11 +29,11 @@ func editAgent(tmux, title, modeFlag, account, color string) (id string, err err
 	if err != nil {
 		return "", err
 	}
-	repoCfg, err := config.LoadRepo(man.RepoRoot)
+	home, err := config.Dir()
 	if err != nil {
 		return "", err
 	}
-	home, err := config.Dir()
+	repoCfg, err := config.LoadRepo(home, man.Repo)
 	if err != nil {
 		return "", err
 	}

@@ -104,7 +104,11 @@ func removeAgent(id string, force bool) (string, error) {
 				return "", err
 			}
 		}
-		repoCfg, err := config.LoadRepo(m.RepoRoot)
+		home, err := config.Dir()
+		if err != nil {
+			return "", err
+		}
+		repoCfg, err := config.LoadRepo(home, m.Repo)
 		if err != nil {
 			return "", err
 		}

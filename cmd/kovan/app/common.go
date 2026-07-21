@@ -135,7 +135,7 @@ func taskDocsFor(m *session.Manifest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	repoCfg, err := config.LoadRepo(m.RepoRoot)
+	repoCfg, err := config.LoadRepo(home, m.Repo)
 	if err != nil {
 		return "", err
 	}

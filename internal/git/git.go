@@ -38,7 +38,7 @@ func (r *Repo) DefaultBase() (string, error) {
 			return b, nil
 		}
 	}
-	return "", fmt.Errorf("cannot determine default base branch; set worktree.base in .kovan.yaml")
+	return "", fmt.Errorf("cannot determine default base branch; set worktree.base in ~/.kovan/projects/<repo>/config.yaml")
 }
 
 // BranchExists reports whether branch exists locally.

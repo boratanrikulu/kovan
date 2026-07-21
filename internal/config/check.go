@@ -37,7 +37,8 @@ func CheckGlobal(data []byte) *Report {
 	return check(data, schemaOf(Global{}), globalTemplate, func() any { return &Global{} })
 }
 
-// CheckRepo diffs a <repo>/.kovan.yaml against the current schema and template.
+// CheckRepo diffs a repo's ~/.kovan/projects/<repo>/config.yaml against the
+// current schema and template.
 func CheckRepo(data []byte) *Report {
 	return check(data, schemaOf(Repo{}), repoTemplate, func() any { return &Repo{} })
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/session"
 )
 
@@ -152,7 +153,7 @@ func TestRunGateLiveModeScope(t *testing.T) {
 	write(filepath.Join(modeDir, "mode.yaml"), "posture: edit\nwrite_paths:\n  - allowed/\n")
 
 	wt := t.TempDir()
-	m := &session.Manifest{ID: "M-1", Title: "g", Worktree: wt, RepoRoot: wt, Tmux: "tm", State: "working", TaskMode: "scoped"}
+	m := &session.Manifest{ID: "M-1", Title: "g", Repo: "grepo", Worktree: wt, RepoRoot: wt, Tmux: "tm", State: "working", TaskMode: "scoped"}
 	if err := m.Write(); err != nil {
 		t.Fatal(err)
 	}
@@ -181,8 +182,12 @@ func TestRunGateLiveModeScope(t *testing.T) {
 		t.Fatalf("a mode.yaml edit should reach the running session, got %q", out)
 	}
 
-	// Repo-level extras extend a scoped mode.
-	write(filepath.Join(wt, ".kovan.yaml"), "write_paths:\n  - Notes/\n")
+	// Repo-level extras extend a scoped mode; the repo config lives in the
+	// kovan home, so it reaches the session from any worktree.
+	if err := os.MkdirAll(filepath.Join(home, "projects", "grepo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(config.RepoConfigPath(home, "grepo"), "write_paths:\n  - Notes/\n")
 	if out := edit(wt + "/Notes/idea.md"); out != "" {
 		t.Fatalf("repo write_paths should extend a scoped mode, got %q", out)
 	}

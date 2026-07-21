@@ -193,7 +193,7 @@ func emitGateDecision(ev hookEvent, m *session.Manifest, w io.Writer) error {
 }
 
 // modeScope resolves the agent's posture and write paths from the live
-// sources: its mode's mode.yaml, plus the repo's .kovan.yaml write_paths as
+// sources: its mode's mode.yaml, plus the repo config's write_paths as
 // extra allowances. The repo paths only extend a mode that is already scoped
 // (read-only or path-scoped) — they never turn an unscoped edit mode into a
 // gated one. Fail-open: an unresolvable mode imposes no restrictions.
@@ -208,8 +208,8 @@ func modeScope(m *session.Manifest) (readOnly bool, writePaths []string) {
 	}
 	readOnly = md.ReadOnly()
 	writePaths = md.WritePaths
-	if (readOnly || len(writePaths) > 0) && m.RepoRoot != "" {
-		if repo, err := config.LoadRepo(m.RepoRoot); err == nil {
+	if (readOnly || len(writePaths) > 0) && m.Repo != "" {
+		if repo, err := config.LoadRepo(home, m.Repo); err == nil {
 			writePaths = append(writePaths, repo.WritePaths...)
 		}
 	}

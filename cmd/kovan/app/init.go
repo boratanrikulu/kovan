@@ -23,9 +23,10 @@ var initCmd = &cobra.Command{
 	Short: "Onboard this repo into kovan (scaffold method + config, sort its AI files)",
 	Long: `Scaffold ~/.kovan if needed, then launch Claude in this repo to read its
 existing AI files and sort them into kovan's layers — global method, per-repo
-private context, and what stays in the repo — writing .kovan.yaml with you.
-kovan does the deterministic scaffolding; Claude does the judgment. Re-runnable;
-the launched session never clobbers your files without asking.`,
+private context, and what stays in the repo — writing the repo's settings to
+~/.kovan/projects/<repo>/config.yaml with you. kovan does the deterministic
+scaffolding; Claude does the judgment. Re-runnable; the launched session never
+clobbers your files without asking.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInit(initReference, initAccount)
@@ -150,7 +151,7 @@ func prepareInit(reference, account string) (*git.Repo, onboard.Data, error) {
 	if err := config.ScaffoldGlobal(home); err != nil {
 		return nil, onboard.Data{}, err
 	}
-	if err := config.ScaffoldRepo(repo.Root); err != nil {
+	if err := config.ScaffoldRepo(home, filepath.Base(repo.Root)); err != nil {
 		return nil, onboard.Data{}, err
 	}
 	if err := method.Scaffold(home); err != nil {
@@ -160,7 +161,7 @@ func prepareInit(reference, account string) (*git.Repo, onboard.Data, error) {
 	if err != nil {
 		return nil, onboard.Data{}, err
 	}
-	repoCfg, err := config.LoadRepo(repo.Root)
+	repoCfg, err := config.LoadRepo(home, filepath.Base(repo.Root))
 	if err != nil {
 		return nil, onboard.Data{}, err
 	}

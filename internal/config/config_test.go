@@ -171,14 +171,14 @@ func TestLoadGlobalNoAccounts(t *testing.T) {
 }
 
 func TestLoadRepoDefaults(t *testing.T) {
-	root := t.TempDir()
+	home := t.TempDir()
 
-	r, err := LoadRepo(root)
+	r, err := LoadRepo(home, "gobee")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Base(root); r.Worktree.Prefix != want {
-		t.Errorf("prefix = %q, want repo basename %q", r.Worktree.Prefix, want)
+	if r.Worktree.Prefix != "gobee" {
+		t.Errorf("prefix = %q, want repo name gobee", r.Worktree.Prefix)
 	}
 	if r.Worktree.BranchTemplate != "feat/{author}_{id}_{slug}" {
 		t.Errorf("branch_template = %q", r.Worktree.BranchTemplate)
@@ -192,11 +192,14 @@ func TestLoadRepoDefaults(t *testing.T) {
 }
 
 func TestLoadRepoOverrides(t *testing.T) {
-	root := t.TempDir()
-	write(t, filepath.Join(root, ".kovan.yaml"),
-		"worktree:\n  prefix: agent\n  base: develop\ntask:\n  dir: tickets\naccount: company\ndomain: code\n")
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "projects", "gobee"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, RepoConfigPath(home, "gobee"),
+		"worktree:\n  prefix: agent\n  base: develop\ntask:\n  dir: tickets\naccount: company\ndomain: code\ncolor: cyan\n")
 
-	r, err := LoadRepo(root)
+	r, err := LoadRepo(home, "gobee")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +214,9 @@ func TestLoadRepoOverrides(t *testing.T) {
 	}
 	if r.Account != "company" || r.Domain != "code" {
 		t.Errorf("account/domain = %q/%q, want company/code", r.Account, r.Domain)
+	}
+	if r.Color != "cyan" {
+		t.Errorf("color = %q, want cyan", r.Color)
 	}
 }
 
@@ -254,26 +260,26 @@ func TestScaffoldGlobalNeverClobbers(t *testing.T) {
 }
 
 func TestScaffoldRepo(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, ".kovan.yaml")
+	home := t.TempDir()
+	path := RepoConfigPath(home, "gobee")
 
-	if err := ScaffoldRepo(root); err != nil {
+	if err := ScaffoldRepo(home, "gobee"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("scaffold did not write .kovan.yaml: %v", err)
+		t.Fatalf("scaffold did not write the repo config: %v", err)
 	}
 	// An empty starter must still load to the repo defaults (all values commented).
-	r, err := LoadRepo(root)
+	r, err := LoadRepo(home, "gobee")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Task.Dir != "works" || r.Worktree.Prefix != filepath.Base(root) {
-		t.Errorf("scaffolded .kovan.yaml did not load to defaults: %+v", r)
+	if r.Task.Dir != "works" || r.Worktree.Prefix != "gobee" {
+		t.Errorf("scaffolded repo config did not load to defaults: %+v", r)
 	}
 
 	write(t, path, "domain: writing\n")
-	if err := ScaffoldRepo(root); err != nil {
+	if err := ScaffoldRepo(home, "gobee"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != "domain: writing\n" {

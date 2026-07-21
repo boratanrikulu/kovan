@@ -46,7 +46,6 @@ func TestSchemaOfGlobal(t *testing.T) {
 		"gates.patterns[].match": kindLeaf,
 		"accounts":               kindMap,
 		"accounts.*.token_file":  kindLeaf,
-		"projects.*.color":       kindLeaf,
 		"tmux.options":           kindLeaf,
 	} {
 		if got, ok := s[path]; !ok || got != kind {
@@ -120,7 +119,7 @@ func TestCheckGlobalMentionInCommentSuppressesNew(t *testing.T) {
 }
 
 func TestCheckGlobalWildcardKeysAreKnown(t *testing.T) {
-	in := "accounts:\n  foo:\n    token_file: /tmp/x\nprojects:\n  bar:\n    color: cyan\n"
+	in := "accounts:\n  foo:\n    token_file: /tmp/x\n  bar:\n    token_file: /tmp/y\n"
 	rep := CheckGlobal([]byte(in))
 	if len(rep.Dead) != 0 {
 		t.Fatalf("Dead = %+v; want none", rep.Dead)

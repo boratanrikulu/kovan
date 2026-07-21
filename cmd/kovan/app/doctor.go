@@ -18,10 +18,11 @@ import (
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check your config files against what this binary understands",
-	Long: `Compares ~/.kovan/config.yaml (and, inside a repo, .kovan.yaml) with the
-current binary: keys it no longer reads, keys added since the file was
-written, and values it would reject or silently ignore. Report only; the
-files are never modified. Exits 1 when something needs attention.
+	Long: `Compares ~/.kovan/config.yaml (and, inside a repo, that repo's
+~/.kovan/projects/<repo>/config.yaml) with the current binary: keys it no
+longer reads, keys added since the file was written, and values it would
+reject or silently ignore. Report only; the files are never modified. Exits 1
+when something needs attention.
 
 With --sync the files are rewritten in place: template documentation is
 refreshed, every line you set is kept exactly as written, and dead keys are
@@ -106,10 +107,11 @@ func doctorRepo(w io.Writer, home string, global *config.Global, decide func(con
 	if err != nil {
 		return true // not inside a repo: nothing to check
 	}
-	path := filepath.Join(repo.Root, ".kovan.yaml")
+	repoName := filepath.Base(repo.Root)
+	path := config.RepoConfigPath(home, repoName)
 	rep, data := checkFile(path, config.CheckRepo)
 	if data != nil && rep.ParseErr == "" {
-		if r, err := config.LoadRepo(repo.Root); err == nil {
+		if r, err := config.LoadRepo(home, repoName); err == nil {
 			rep.Values = append(rep.Values, repoValueFindings(r, global, home)...)
 		}
 	}
@@ -119,7 +121,17 @@ func doctorRepo(w io.Writer, home string, global *config.Global, decide func(con
 	if decide != nil {
 		clean = syncStep(w, path, rep, data, config.SyncRepo, config.CheckRepo, decide)
 	}
+	// a .kovan.yaml still sitting in the repo is dead weight: nothing reads it
+	if legacy := filepath.Join(repo.Root, ".kovan.yaml"); statExists(legacy) {
+		fmt.Fprintf(w, "  %s is no longer read; move its settings to %s\n", legacy, path)
+		clean = false
+	}
 	return clean
+}
+
+func statExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // syncStep rewrites one config file: decide is asked about each dead key, the
@@ -220,14 +232,6 @@ func globalValueFindings(g *config.Global, home string) []config.Finding {
 			add(fmt.Sprintf("gates.patterns[%d].action: %q", i, p.Action), `not "ask", "deny" or "off"; sent verbatim to Claude, which rejects it`)
 		}
 	}
-	for name, p := range g.Projects {
-		if p.Color == "" {
-			continue
-		}
-		if _, ok := rowTints[p.Color]; !ok {
-			add(fmt.Sprintf("projects.%s.color: %q", name, p.Color), "not a palette color (red/orange/yellow/green/cyan/blue/magenta/grey); silently ignored")
-		}
-	}
 	if g.DefaultMode != "" {
 		if _, err := mode.Load(home, g.DefaultMode); err != nil {
 			add(fmt.Sprintf("default_mode: %q", g.DefaultMode), err.Error())
@@ -262,6 +266,11 @@ func repoValueFindings(r *config.Repo, global *config.Global, home string) []con
 	if r.Domain != "" {
 		if _, err := os.Stat(filepath.Join(home, "method", "domains", r.Domain)); err != nil {
 			add(fmt.Sprintf("domain: %q", r.Domain), "no ~/.kovan/method/domains/"+r.Domain+"; the domain layer silently contributes nothing")
+		}
+	}
+	if r.Color != "" {
+		if _, ok := rowTints[r.Color]; !ok {
+			add(fmt.Sprintf("color: %q", r.Color), "not a palette color (red/orange/yellow/green/cyan/blue/magenta/grey); silently ignored")
 		}
 	}
 	if r.Account != "" && global != nil {

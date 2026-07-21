@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/boratanrikulu/kovan/internal/config"
 )
 
 // initRepo makes a throwaway git repo and cd's into it; skips if git is absent.
@@ -52,8 +54,8 @@ func TestPrepareInit(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "config.yaml")); err != nil {
 		t.Errorf("prepareInit did not scaffold config.yaml: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(repo.Root, ".kovan.yaml")); err != nil {
-		t.Errorf("prepareInit did not scaffold .kovan.yaml: %v", err)
+	if _, err := os.Stat(config.RepoConfigPath(home, filepath.Base(repo.Root))); err != nil {
+		t.Errorf("prepareInit did not scaffold the repo config: %v", err)
 	}
 }
 

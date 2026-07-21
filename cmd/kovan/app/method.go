@@ -150,7 +150,11 @@ func methodContext(id string) (methodCtx, error) {
 		if err != nil {
 			return methodCtx{}, err
 		}
-		rc, err := config.LoadRepo(m.RepoRoot)
+		home, err := config.Dir()
+		if err != nil {
+			return methodCtx{}, err
+		}
+		rc, err := config.LoadRepo(home, m.Repo)
 		if err != nil {
 			return methodCtx{}, err
 		}
@@ -164,7 +168,11 @@ func methodContext(id string) (methodCtx, error) {
 	if err != nil {
 		return methodCtx{}, err
 	}
-	rc, err := config.LoadRepo(repo.Root)
+	home, err := config.Dir()
+	if err != nil {
+		return methodCtx{}, err
+	}
+	rc, err := config.LoadRepo(home, filepath.Base(repo.Root))
 	if err != nil {
 		return methodCtx{}, err
 	}

@@ -80,7 +80,7 @@ do.
 ```sh
 kovan setup                # once per machine: wire the Claude Code hooks
 cd your-repo
-kovan init                 # onboard the repo: Claude sorts your AI files into layers
+kovan init                 # onboard the repo: sort its AI files into layers (or just set defaults if it has none)
 kovan                      # the board
 ```
 

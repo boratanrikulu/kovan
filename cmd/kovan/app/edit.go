@@ -96,6 +96,7 @@ func newEditForm(row boardRow) editModel {
 			e.accounts = append(e.accounts, name)
 		}
 		sort.Strings(e.accounts)
+		e.accounts = accountPicks(e.accounts)
 		e.account = indexOf(e.accounts, row.Account)
 	}
 	e.colors = append([]string{"none"}, rowTintNames...)
@@ -131,7 +132,7 @@ func (e editModel) selectedAccount() string {
 	if len(e.accounts) == 0 {
 		return ""
 	}
-	return e.accounts[e.account]
+	return accountValue(e.accounts[e.account])
 }
 
 // selectedColor is the manifest value: the palette name, or "" for none.

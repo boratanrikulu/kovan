@@ -12,13 +12,13 @@ import (
 )
 
 func TestSummarizeScript(t *testing.T) {
-	withTok := summarizeScript("claude", "/tok/company", "opus", "INSTRUCT")
+	withTok := summarizeScript("claude", "/tok/company", nil, "opus", "INSTRUCT")
 	for _, want := range []string{`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/tok/company')"`, "claude", "--model 'opus'", "-p 'INSTRUCT'"} {
 		if !strings.Contains(withTok, want) {
 			t.Errorf("script missing %q:\n%s", want, withTok)
 		}
 	}
-	noTok := summarizeScript("claude", "", "opus", "INSTRUCT")
+	noTok := summarizeScript("claude", "", nil, "opus", "INSTRUCT")
 	if strings.Contains(noTok, "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("no-token script should not inject a token: %s", noTok)
 	}
@@ -291,5 +291,18 @@ func TestWrapJoin(t *testing.T) {
 	lines := wrapJoin([]string{"aa", "bb", "cc", "dd"}, " · ", 7, 2)
 	if len(lines) != 2 || lines[0] != "aa · bb" || lines[1] != "cc · dd" {
 		t.Errorf("wrapJoin = %v", lines)
+	}
+}
+
+// TestSummarizeScriptAccountEnv: the summarizer runs under the agent's account,
+// so it launches with that account's env too — otherwise a pin that the agents
+// rely on would silently not apply to their summaries.
+func TestSummarizeScriptAccountEnv(t *testing.T) {
+	env := map[string]string{"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]"}
+	got := summarizeScript("claude", "/tok/company", env, "opus", "INSTRUCT")
+	want := `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ` +
+		`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/tok/company')" claude --model 'opus' -p 'INSTRUCT'`
+	if got != want {
+		t.Errorf("summarizer script =\n%q\nwant\n%q", got, want)
 	}
 }

@@ -184,3 +184,18 @@ func TestCheckPatternListKeys(t *testing.T) {
 		t.Fatalf("Dead = %+v; want exactly gates.patterns[].badkey", rep.Dead)
 	}
 }
+
+// TestCheckGlobalFreeFormMap: an account's env map holds keys the user invents,
+// so the checker must not walk into it and call them dead. The account itself is
+// still schema-checked, so a typo one level up is still reported.
+func TestCheckGlobalFreeFormMap(t *testing.T) {
+	rep := CheckGlobal([]byte("accounts:\n  company:\n    token_file: /t\n" +
+		"    env:\n      ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5[1m]\n"))
+	if len(rep.Dead) != 0 {
+		t.Fatalf("Dead = %+v; want none (env keys are the user's)", rep.Dead)
+	}
+	typo := CheckGlobal([]byte("accounts:\n  company:\n    token_flie: /t\n"))
+	if len(typo.Dead) != 1 || typo.Dead[0].Path != "accounts.company.token_flie" {
+		t.Fatalf("Dead = %+v; want accounts.company.token_flie", typo.Dead)
+	}
+}

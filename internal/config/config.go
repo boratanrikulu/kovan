@@ -45,7 +45,8 @@ type Apps struct {
 // Account is a Claude account an agent can run under. Its OAuth token lives in a
 // file (referenced, never inlined), read at launch.
 type Account struct {
-	TokenFile string `yaml:"token_file"`
+	TokenFile string            `yaml:"token_file"`
+	Env       map[string]string `yaml:"env"`
 }
 
 // Tmux holds tmux options kovan applies to every agent session it spawns, so
@@ -251,6 +252,8 @@ const globalTemplate = `# kovan's own settings. Every line below is commented: t
 # accounts:               # Claude accounts an agent can run under
 #   personal:
 #     token_file: ~/.kovan/tokens/personal   # claude setup-token, then chmod 600
+#     env:                                   # extra env for this account's agents
+#       ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5[1m]
 # default_account: personal
 
 # default_mode: code      # task mode when neither the repo nor the command sets one

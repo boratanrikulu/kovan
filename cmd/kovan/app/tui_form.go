@@ -117,6 +117,7 @@ func newForm() formModel {
 			f.accounts = append(f.accounts, name)
 		}
 		sort.Strings(f.accounts)
+		f.accounts = accountPicks(f.accounts)
 		f.account = indexOf(f.accounts, g.DefaultAccount)
 	}
 	return f
@@ -405,12 +406,13 @@ func indexOf(ss []string, s string) int {
 
 func (f formModel) value(i int) string { return strings.TrimSpace(f.inputs[i].Value()) }
 
-// selectedAccount is the chosen account name, or "" when none are configured.
+// selectedAccount is the chosen account name, or "" for the system entry (and
+// when none are configured) — both mean no token injection.
 func (f formModel) selectedAccount() string {
 	if len(f.accounts) == 0 {
 		return ""
 	}
-	return f.accounts[f.account]
+	return accountValue(f.accounts[f.account])
 }
 
 // selectedMode is the chosen task mode, or "" when none are listed (then start

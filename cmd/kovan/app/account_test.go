@@ -60,15 +60,15 @@ func TestAccountTokenFile(t *testing.T) {
 }
 
 func TestLaunchCommand(t *testing.T) {
-	if got := launchCommand("claude", "fix vfs", launchFresh, "", "/notes", "sid"); got != "claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'" {
+	if got := launchCommand("claude", "fix vfs", launchFresh, "", nil, "/notes", "sid"); got != "claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'" {
 		t.Errorf("no account = %q", got)
 	}
-	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", "/notes", "sid")
+	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", nil, "/notes", "sid")
 	want := `CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'`
 	if got != want {
 		t.Errorf("with account = %q, want %q", got, want)
 	}
-	if got := launchCommand("claude", "ignored", launchResume, "/x/tok", "/notes", "sid"); !strings.HasSuffix(got, "claude --add-dir '/notes' --resume 'sid'") {
+	if got := launchCommand("claude", "ignored", launchResume, "/x/tok", nil, "/notes", "sid"); !strings.HasSuffix(got, "claude --add-dir '/notes' --resume 'sid'") {
 		t.Errorf("resume = %q", got)
 	}
 	// The token value itself must never appear — only the path.
@@ -112,5 +112,75 @@ func TestRunnerSessionInjectsAccount(t *testing.T) {
 	}
 	if strings.Contains(plain.Cmd, oauthEnvKey) {
 		t.Errorf("no account should inject no token env, got %q", plain.Cmd)
+	}
+}
+
+// TestAccountPicks pins the system entry: it heads the picker and maps to the
+// empty account, which is what skips token injection so the agent inherits the
+// machine's login (and with it the account's entitlements).
+func TestAccountPicks(t *testing.T) {
+	if got := accountPicks(nil); got != nil {
+		t.Errorf("no configured accounts should hide the field, got %v", got)
+	}
+	picks := accountPicks([]string{"company", "personal"})
+	want := []string{systemAccount, "company", "personal"}
+	if len(picks) != len(want) {
+		t.Fatalf("picks = %v, want %v", picks, want)
+	}
+	for i := range want {
+		if picks[i] != want[i] {
+			t.Fatalf("picks = %v, want %v", picks, want)
+		}
+	}
+	if got := accountValue(systemAccount); got != "" {
+		t.Errorf("system entry = %q, want empty (no injection)", got)
+	}
+	if got := accountValue("company"); got != "company" {
+		t.Errorf("named account = %q, want company", got)
+	}
+	// An unset account lands on the system entry rather than a named one.
+	if idx := indexOf(picks, ""); idx != 0 {
+		t.Errorf("unset account index = %d, want 0 (system)", idx)
+	}
+}
+
+// TestLaunchCommandAccountEnv pins the per-account environment: entries are
+// sorted for a stable command and land ahead of the token, so an account whose
+// token lacks its plan's entitlements can pin the model that restores them.
+func TestLaunchCommandAccountEnv(t *testing.T) {
+	env := map[string]string{
+		"ZZ_LAST":                      "1",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]",
+	}
+	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", env, "/notes", "sid")
+	want := `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ZZ_LAST='1' ` +
+		`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'`
+	if got != want {
+		t.Errorf("account env =\n%q\nwant\n%q", got, want)
+	}
+	// Env without an account still applies; no token is injected.
+	solo := launchCommand("claude", "g", launchFresh, "", env, "/notes", "sid")
+	if strings.Contains(solo, oauthEnvKey) {
+		t.Errorf("no token file should inject no token env, got %q", solo)
+	}
+	if !strings.HasPrefix(solo, "ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ") {
+		t.Errorf("env prefix missing, got %q", solo)
+	}
+}
+
+// TestAccountEnvLookup: only a named account carries env; the system entry ("")
+// launches clean so it inherits the machine's login untouched.
+func TestAccountEnvLookup(t *testing.T) {
+	g := &config.Global{Accounts: map[string]config.Account{
+		"company": {TokenFile: "/x/tok", Env: map[string]string{"K": "v"}},
+	}}
+	if got := accountEnv(g, "company"); got["K"] != "v" {
+		t.Errorf("company env = %v", got)
+	}
+	if got := accountEnv(g, ""); got != nil {
+		t.Errorf("system account env = %v, want nil", got)
+	}
+	if got := accountEnv(g, "missing"); got != nil {
+		t.Errorf("unknown account env = %v, want nil", got)
 	}
 }

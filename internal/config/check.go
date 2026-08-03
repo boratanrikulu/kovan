@@ -73,6 +73,7 @@ const (
 	kindStruct                 // fixed set of child keys
 	kindMap                    // map of structs; children live under a "*" segment
 	kindList                   // list of structs; children live under a "[]" segment
+	kindFree                   // map whose keys the user defines; children are never unknown
 )
 
 // schemaOf walks a config struct's yaml tags and returns every known key path,
@@ -99,6 +100,8 @@ func walkStruct(t reflect.Type, prefix string, s map[string]nodeKind) {
 			s[path] = kindMap
 			s[path+".*"] = kindStruct
 			walkStruct(ft.Elem(), path+".*", s)
+		case ft.Kind() == reflect.Map:
+			s[path] = kindFree
 		case ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct:
 			s[path] = kindList
 			s[path+"[]"] = kindStruct
@@ -263,6 +266,9 @@ func activePaths(doc *yaml.Node, schema map[string]nodeKind) []mention {
 func walkNode(n *yaml.Node, path, raw string, schema map[string]nodeKind, out *[]mention) {
 	switch n.Kind {
 	case yaml.MappingNode:
+		if schema[path] == kindFree {
+			return
+		}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i].Value
 			seg := key

@@ -73,16 +73,16 @@ func stale(s agentSummary, ok bool, force bool) bool {
 // agent's account: the token is read at exec time (never in argv/logs), the
 // instruction is the prompt, and the conversation digest is piped on stdin by
 // the caller.
-func summarizeScript(agent, tokenFile, model, instruction string) string {
+func summarizeScript(agent, tokenFile string, env map[string]string, model, instruction string) string {
 	cmd := agent
 	if model != "" {
 		cmd += " --model " + shellQuote(model)
 	}
 	cmd += " -p " + shellQuote(instruction)
 	if tokenFile != "" {
-		return "CLAUDE_CODE_OAUTH_TOKEN=\"$(cat " + shellQuote(tokenFile) + ")\" " + cmd
+		cmd = oauthEnvKey + "=" + tokenReadExpr(tokenFile) + " " + cmd
 	}
-	return cmd
+	return envPrefix(env) + cmd
 }
 
 // summarizeCmd summarizes an agent's recent conversation with a one-shot
@@ -105,7 +105,7 @@ func summarizeCmd(global *config.Global, row boardRow) tea.Cmd {
 		// grounded read. KOVAN_MONITOR makes the gate hook a no-op for this helper
 		// (the hook resolves agents by cwd; without the guard its Stop → idle would
 		// corrupt the agent's manifest).
-		script := summarizeScript(global.Agent, tokenFile, global.Monitor.Model, monitorInstruction)
+		script := summarizeScript(global.Agent, tokenFile, accountEnv(global, row.Account), global.Monitor.Model, monitorInstruction)
 		cmd := exec.Command("sh", "-c", script)
 		cmd.Stdin = strings.NewReader(input)
 		cmd.Dir = row.Worktree

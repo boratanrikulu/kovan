@@ -74,7 +74,7 @@ func runnerSession(m *session.Manifest, mode launchMode, prompt string) (runner.
 		Name:    m.Tmux,
 		Title:   fmt.Sprintf("%s: %s", m.ID, m.Title), // tmux window + terminal tab
 		Dir:     m.Worktree,
-		Cmd:     launchCommand(m.Agent, prompt, mode, tokenFile, notes, m.SessionID),
+		Cmd:     launchCommand(m.Agent, prompt, mode, tokenFile, accountEnv(global, m.Account), notes, m.SessionID),
 		Options: opts,
 	}, nil
 }

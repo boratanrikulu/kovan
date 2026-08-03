@@ -16,6 +16,11 @@ Spec before code. Turn the brief into a plan I approve, then build it.
 
 ## Done means
 
-Built, the tests you wrote pass, the full suite is green, and Status in the brief
-is current. Record gotchas in learnings.md. Commit in logical chunks; never push
-or open a PR without a fresh go.
+First, review your own work: re-read the diff against the spec and the
+Assumptions & Open Questions like a skeptic, and check by hand whatever the tests
+don't cover. Fix what you find. Tests catch behavior; this catches spec-drift,
+missed edge cases, and needless complexity.
+
+Then done means: built, the tests you wrote pass, the full suite is green, and
+Status in the brief is current. Record gotchas in learnings.md. Commit in logical
+chunks; never push or open a PR without a fresh go.

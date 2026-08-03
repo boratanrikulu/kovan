@@ -103,6 +103,28 @@ Resolution order: `kovan start --account X` > the repo's `account:` >
 run under each agent's own account too, so summary cost lands on the right
 plan.
 
+An injected token authenticates against its plan but arrives without the
+account's entitlements, so a feature your plan includes — the 1M context
+window on Max and Team, for one — can be missing inside an agent even though
+it works in a normal `claude` session. Two ways around it. Pick **default
+(system)** in the new-agent form or the board's edit modal (`c`) to inject no
+token at all: the agent inherits the machine's login and everything that comes
+with it, at the cost of billing to whichever account is logged in. Or give the
+account an `env` map, applied to that account's agents at launch:
+
+```yaml
+accounts:
+  company:
+    token_file: ~/.kovan/tokens/company
+    env:
+      ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5[1m]
+```
+
+Pinning the model this way asks for the window directly instead of going
+through the picker that refuses it, and keeps the per-account billing. Note a
+pin holds until you change it: the agent stays on that exact model when a newer
+one ships.
+
 ## Gates
 
 Everything defaults to `ask`: the agent pauses and the decision escalates to
@@ -186,9 +208,11 @@ inside the worktree while the task docs stay writable. Override a built-in or
 add your own by creating `~/.kovan/modes/<name>/` with a `prompt.md`
 (placeholders `{{brief}}`, `{{artifact}}`), an optional `mode.yaml`
 (`posture: edit|read-only`, `docs: [...]`, `write_paths: [...]`), and an
-optional `method.md` the agent carries across sessions. `write_paths` scopes
-an editing mode to a corner of the repo, or acts as a carve-out from
-read-only:
+optional `method.md` the agent carries across sessions. The override is
+per-file: drop just a `method.md` (or just a `prompt.md`) to retune that one
+part and keep the rest of the built-in, the usual way to adjust a shipped mode
+without rewriting its prompt or posture. `write_paths` scopes an editing mode to
+a corner of the repo, or acts as a carve-out from read-only:
 
 ```yaml
 # ~/.kovan/modes/docs-only/mode.yaml

@@ -66,9 +66,20 @@ KOVAN_HOME=/tmp/kovan-demo/home go run ./cmd/kovan
 
 ## install
 
+macOS, via Homebrew:
+
+```sh
+brew install boratanrikulu/tap/kovan
+```
+
+Linux, or from source:
+
 ```sh
 go install github.com/boratanrikulu/kovan/cmd/kovan@latest
 ```
+
+Or grab a prebuilt tarball (darwin/linux, amd64/arm64) from the
+[releases](https://github.com/boratanrikulu/kovan/releases) page.
 
 You need `git`, `tmux`, and the `claude` CLI on PATH. Claude Code is the
 supported agent today; Codex support is on the way. Desktop notifications and

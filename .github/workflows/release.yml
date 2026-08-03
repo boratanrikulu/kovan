@@ -1,0 +1,31 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          # Creates the GitHub release on this repo (provided automatically).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with repo scope on boratanrikulu/homebrew-tap, so goreleaser can
+          # push the formula to that separate repo. Create this secret yourself.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

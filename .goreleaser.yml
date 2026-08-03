@@ -1,0 +1,59 @@
+# Release config for goreleaser v2. Tag v* → GitHub release with tarballs +
+# checksums, and a Homebrew cask pushed to boratanrikulu/homebrew-tap for mac.
+# No Windows: kovan needs tmux. Linux users take the tarball.
+version: 2
+
+project_name: kovan
+
+builds:
+  - id: kovan
+    main: ./cmd/kovan
+    binary: kovan
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: kovan
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+homebrew_casks:
+  - name: kovan
+    repository:
+      owner: boratanrikulu
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/boratanrikulu/kovan"
+    description: "Teach your engineering methodology once; every AI agent inherits it"
+    dependencies:
+      - formula: git
+      - formula: tmux
+    caveats: "kovan drives Claude Code today (more agents later) — install the claude CLI separately: https://claude.com/claude-code"
+    commit_author:
+      name: goreleaser
+      email: noreply@github.com
+    # The binary is unsigned; clear the gatekeeper quarantine flag on install so
+    # `kovan` runs without a "developer cannot be verified" block.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kovan"]
+          end
+
+release:
+  github:
+    owner: boratanrikulu
+    name: kovan

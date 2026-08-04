@@ -64,7 +64,8 @@ func openTarget(id string, run runner.Runner) (name string, woke bool, err error
 	case actionMissing:
 		return "", false, fmt.Errorf("worktree missing; run `kovan remove %s`", id)
 	case actionWake:
-		sess, err := runnerSession(m, launchResume, "")
+		mode, prompt := wakeLaunch(m)
+		sess, err := runnerSession(m, mode, prompt)
 		if err != nil {
 			return "", false, err
 		}
@@ -74,4 +75,32 @@ func openTarget(id string, run runner.Runner) (name string, woke bool, err error
 		woke = true
 	}
 	return name, woke, nil
+}
+
+// wakeLaunch decides how a stopped agent comes back. Normally it resumes its
+// conversation, but the agent tool expires transcripts on its own retention
+// window while kovan's worktree, branch, and task docs live on — so an agent
+// older than that window would otherwise be unwakeable. When the conversation
+// is gone, it starts fresh and rebuilds from the notes instead.
+func wakeLaunch(m *session.Manifest) (launchMode, string) {
+	if m.SessionID == "" || transcriptExists(m.SessionID) {
+		return launchResume, ""
+	}
+	notes, err := taskDocsFor(m)
+	if err != nil {
+		notes = ""
+	}
+	return launchFresh, recoveryPrompt(notes)
+}
+
+// recoveryPrompt opens a session whose conversation no longer exists. The code
+// and the notes outlive the transcript, so the agent re-derives where the task
+// stands from them, and reports before it touches anything.
+func recoveryPrompt(notes string) string {
+	p := "Your previous conversation is gone: the agent tool expired the transcript, so this session starts with no history. " +
+		"The work itself is intact — this worktree holds the code and its branch holds the commits."
+	if notes != "" {
+		p += " Your notes are in " + notes + ": read context.md first, its Status says where things stood, then the rest of the docs there."
+	}
+	return p + " Work out where the task actually stands, tell me, and wait for my go before changing anything."
 }

@@ -21,29 +21,47 @@ var transcriptPaths sync.Map
 // — ~/.claude/projects/*/<id>.jsonl, no path-encoding logic needed — resolving
 // the path once and re-globbing only when the cached file goes away.
 func transcriptTail(sessionID string, max int64) ([]byte, bool) {
-	if sessionID == "" {
+	path, ok := transcriptPath(sessionID)
+	if !ok {
 		return nil, false
 	}
+	tail, err := readTail(path, max)
+	if err != nil {
+		return nil, false
+	}
+	return tail, true
+}
+
+// transcriptPath locates an agent's conversation on disk, caching the hit. Not
+// found means the agent tool has expired it — Claude Code prunes transcripts on
+// a retention window (30 days by default), long before a kovan agent's worktree
+// and notes go anywhere.
+func transcriptPath(sessionID string) (string, bool) {
+	if sessionID == "" {
+		return "", false
+	}
 	if p, ok := transcriptPaths.Load(sessionID); ok {
-		if tail, err := readTail(p.(string), max); err == nil {
-			return tail, true
+		if _, err := os.Stat(p.(string)); err == nil {
+			return p.(string), true
 		}
 		transcriptPaths.Delete(sessionID)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, false
+		return "", false
 	}
 	matches, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
 	if err != nil || len(matches) == 0 {
-		return nil, false
+		return "", false
 	}
 	transcriptPaths.Store(sessionID, matches[0])
-	tail, err := readTail(matches[0], max)
-	if err != nil {
-		return nil, false
-	}
-	return tail, true
+	return matches[0], true
+}
+
+// transcriptExists reports whether an agent still has a conversation to resume.
+func transcriptExists(sessionID string) bool {
+	_, ok := transcriptPath(sessionID)
+	return ok
 }
 
 // readTail returns up to the last max bytes of path.

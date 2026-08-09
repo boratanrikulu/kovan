@@ -11,6 +11,9 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    # HOMEBREW_TAP_GITHUB_TOKEN lives in this environment; only a job that
+    # declares it can read the secret.
+    environment: release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +29,6 @@ jobs:
         env:
           # Creates the GitHub release on this repo (provided automatically).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with repo scope on boratanrikulu/homebrew-tap, so goreleaser can
-          # push the formula to that separate repo. Create this secret yourself.
+          # PAT with contents write on boratanrikulu/homebrew-tap, so goreleaser
+          # can push the cask to that separate repo.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

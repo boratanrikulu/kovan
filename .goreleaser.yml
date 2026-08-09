@@ -1,6 +1,6 @@
-# Release config for goreleaser v2. Tag v* → GitHub release with tarballs +
-# checksums, and a Homebrew cask pushed to boratanrikulu/homebrew-tap for mac.
-# No Windows: kovan needs tmux. Linux users take the tarball.
+# Release config for goreleaser v2. Tag v* → GitHub release with tarballs,
+# Linux packages and checksums, plus a Homebrew cask pushed to
+# boratanrikulu/homebrew-tap for mac. No Windows: kovan needs tmux.
 version: 2
 
 project_name: kovan
@@ -25,6 +25,23 @@ archives:
     formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+# Homebrew casks are macOS-only, so Linux gets distro packages instead. The
+# claude CLI is not in any distro's repos, so it stays a documented
+# prerequisite rather than a dependency that would make the package
+# uninstallable.
+nfpms:
+  - id: kovan
+    package_name: kovan
+    formats: [deb, rpm, apk]
+    maintainer: "Bora Tanrikulu <me@bora.sh>"
+    description: "Teach your engineering methodology once; every AI agent inherits it"
+    homepage: "https://github.com/boratanrikulu/kovan"
+    license: MIT
+    bindir: /usr/bin
+    dependencies:
+      - git
+      - tmux
 
 checksum:
   name_template: checksums.txt

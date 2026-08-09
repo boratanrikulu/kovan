@@ -72,14 +72,20 @@ macOS, via Homebrew:
 brew install boratanrikulu/tap/kovan
 ```
 
-Linux, or from source:
+Linux, from the [releases](https://github.com/boratanrikulu/kovan/releases)
+page — `.deb`, `.rpm` and `.apk`, amd64 and arm64:
+
+```sh
+sudo dpkg -i kovan_0.1.0_linux_amd64.deb
+```
+
+Or from source, anywhere:
 
 ```sh
 go install github.com/boratanrikulu/kovan/cmd/kovan@latest
 ```
 
-Or grab a prebuilt tarball (darwin/linux, amd64/arm64) from the
-[releases](https://github.com/boratanrikulu/kovan/releases) page.
+Prebuilt tarballs (darwin/linux, amd64/arm64) are on the same releases page.
 
 You need `git`, `tmux`, and the `claude` CLI on PATH. Claude Code is the
 supported agent today; Codex support is on the way. Desktop notifications and

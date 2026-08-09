@@ -6,8 +6,12 @@ setup, then it's daily-driver territory.
 ## Install
 
 ```sh
-go install github.com/boratanrikulu/kovan/cmd/kovan@latest
+brew install boratanrikulu/tap/kovan                        # macOS
+go install github.com/boratanrikulu/kovan/cmd/kovan@latest  # anywhere
 ```
+
+Linux also gets `.deb` / `.rpm` / `.apk` packages on the
+[releases](https://github.com/boratanrikulu/kovan/releases) page.
 
 Prerequisites on PATH: `git`, `tmux`, and the `claude` CLI (Claude Code).
 macOS additionally gets desktop notifications and clipboard-image paste in

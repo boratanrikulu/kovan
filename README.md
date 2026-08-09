@@ -52,18 +52,6 @@ flips to needs-you, the summary tells you what it wants before you open it.*
 The [design doc](docs/design.md) walks the whole machine: how one method
 reaches every agent, and why enforcement is hooks, not prose.
 
-## try it in 60 seconds
-
-No tokens, no agents — a seeded fake fleet to walk the cockpit:
-
-```sh
-git clone https://github.com/boratanrikulu/kovan && cd kovan
-./demo/seed.sh
-KOVAN_HOME=/tmp/kovan-demo/home go run ./cmd/kovan
-```
-
-(`./demo/teardown.sh` removes every trace.)
-
 ## install
 
 macOS, via Homebrew:
@@ -91,6 +79,18 @@ You need `git`, `tmux`, and the `claude` CLI on PATH. Claude Code is the
 supported agent today; Codex support is on the way. Desktop notifications and
 clipboard-image paste are macOS; everything else works anywhere Go and tmux
 do.
+
+## demo in 60 seconds
+
+No tokens, no agents — a seeded fake fleet to walk the cockpit:
+
+```sh
+git clone https://github.com/boratanrikulu/kovan && cd kovan
+./demo/seed.sh
+KOVAN_HOME=/tmp/kovan-demo/home kovan
+```
+
+(`./demo/teardown.sh` removes every trace.)
 
 ## quickstart
 

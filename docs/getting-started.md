@@ -6,11 +6,11 @@ setup, then it's daily-driver territory.
 ## Install
 
 ```sh
-brew install boratanrikulu/tap/kovan                        # macOS
-go install github.com/boratanrikulu/kovan/cmd/kovan@latest  # anywhere
+brew install boratanrikulu/tap/kovan               # macOS
+sudo dpkg -i kovan_0.1.0_linux_amd64.deb           # Linux
 ```
 
-Linux also gets `.deb` / `.rpm` / `.apk` packages on the
+Linux gets `.deb` / `.rpm` / `.apk` packages on the
 [releases](https://github.com/boratanrikulu/kovan/releases) page.
 
 Prerequisites on PATH: `git`, `tmux`, and the `claude` CLI (Claude Code).

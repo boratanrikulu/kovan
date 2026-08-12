@@ -144,9 +144,15 @@ func List(home string) []string {
 			}
 		}
 	}
+	// A user dir only counts once it can actually load: one holding just a
+	// method.md is a retune of a built-in, not a mode of its own, and offering
+	// it in the picker would lead straight to "unknown mode".
 	if entries, err := os.ReadDir(filepath.Join(home, "modes")); err == nil {
 		for _, e := range entries {
-			if e.IsDir() {
+			if !e.IsDir() {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(home, "modes", e.Name(), "prompt.md")); err == nil {
 				add(e.Name())
 			}
 		}

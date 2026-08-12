@@ -237,6 +237,10 @@ func globalValueFindings(g *config.Global, home string) []config.Finding {
 			add(fmt.Sprintf("default_mode: %q", g.DefaultMode), err.Error())
 		}
 	}
+	for _, name := range unloadableModeDirs(home) {
+		add("modes/"+name, "no prompt.md and no built-in of that name: the mode cannot load, "+
+			"so it is not offered, and an agent already on it runs with its posture and write_paths unenforced")
+	}
 	if g.DefaultAccount != "" {
 		if _, ok := g.Accounts[g.DefaultAccount]; !ok {
 			add(fmt.Sprintf("default_account: %q", g.DefaultAccount), "not configured under accounts")
@@ -317,4 +321,25 @@ func printReport(w io.Writer, header string, rep *config.Report) {
 	if empty {
 		fmt.Fprintln(w, "  ok — matches the current schema")
 	}
+}
+
+// unloadableModeDirs names the directories under ~/.kovan/modes that look like a
+// mode but cannot load: no prompt.md, and no built-in of that name to layer
+// over. They are easy to create by dropping in a method.md alone, and the cost
+// is quiet: the posture gates fail open for any agent already on that mode.
+func unloadableModeDirs(home string) []string {
+	entries, err := os.ReadDir(filepath.Join(home, "modes"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := mode.Load(home, e.Name()); err != nil {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }

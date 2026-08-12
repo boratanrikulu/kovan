@@ -3,6 +3,7 @@ package mode
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -212,5 +213,24 @@ func TestMethodFile(t *testing.T) {
 	// A mode with no method anywhere yields "".
 	if p, err := MethodFile(home, "no-such-mode"); err != nil || p != "" {
 		t.Errorf("unknown mode method = %q, err %v; want empty", p, err)
+	}
+}
+
+// List must not offer a mode Load will reject: a directory that carries no
+// prompt.md and shadows no built-in is not a mode, and the picker showing it
+// leads straight to "unknown mode".
+func TestListOnlyOffersLoadableModes(t *testing.T) {
+	home := t.TempDir()
+	writeMode(t, home, "finance", map[string]string{"prompt.md": "x {{brief}}"})
+	writeMode(t, home, "notamode", map[string]string{"method.md": "just a method"})
+
+	names := List(home)
+	for _, n := range names {
+		if _, err := Load(home, n); err != nil {
+			t.Errorf("List offered %q but Load rejects it: %v", n, err)
+		}
+	}
+	if !slices.Contains(names, "finance") {
+		t.Errorf("List should offer a complete user mode; got %v", names)
 	}
 }

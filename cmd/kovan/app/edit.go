@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -89,6 +90,13 @@ func newEditForm(row boardRow) editModel {
 	e := editModel{id: row.ID, repo: row.Repo, tmux: row.Tmux, title: title}
 	if home, err := config.Dir(); err == nil {
 		e.modes = mode.List(home)
+		// An agent can carry a mode the list no longer offers, e.g. its directory
+		// lost its prompt.md. Keep it as the current pick instead of falling back
+		// to the first entry, which would rewrite the agent's mode on a save the
+		// user made for some other field.
+		if row.Mode != "" && !slices.Contains(e.modes, row.Mode) {
+			e.modes = append([]string{row.Mode}, e.modes...)
+		}
 		e.mode = indexOf(e.modes, row.Mode)
 	}
 	if g, err := config.LoadGlobal(); err == nil && len(g.Accounts) > 0 {

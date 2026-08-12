@@ -7,7 +7,7 @@ setup, then it's daily-driver territory.
 
 ```sh
 brew install boratanrikulu/tap/kovan               # macOS
-sudo dpkg -i kovan_0.1.0_linux_amd64.deb           # Linux
+sudo dpkg -i kovan_*_linux_amd64.deb           # Linux
 ```
 
 Linux gets `.deb` / `.rpm` / `.apk` packages on the

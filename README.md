@@ -86,7 +86,7 @@ Linux, from the [releases](https://github.com/boratanrikulu/kovan/releases)
 page — `.deb`, `.rpm` and `.apk`, amd64 and arm64:
 
 ```sh
-sudo dpkg -i kovan_0.1.0_linux_amd64.deb
+sudo dpkg -i kovan_*_linux_amd64.deb
 ```
 
 Or from source, anywhere:

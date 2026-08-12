@@ -12,6 +12,7 @@ import (
 
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/mode"
+	"github.com/boratanrikulu/kovan/internal/taskdoc"
 	"github.com/spf13/cobra"
 )
 
@@ -241,6 +242,7 @@ func globalValueFindings(g *config.Global, home string) []config.Finding {
 		add("modes/"+name, "no prompt.md and no built-in of that name: the mode cannot load, "+
 			"so it is not offered, and an agent already on it runs with its posture and write_paths unenforced")
 	}
+	out = append(out, modeDocFindings(home)...)
 	if g.DefaultAccount != "" {
 		if _, ok := g.Accounts[g.DefaultAccount]; !ok {
 			add(fmt.Sprintf("default_account: %q", g.DefaultAccount), "not configured under accounts")
@@ -339,6 +341,28 @@ func unloadableModeDirs(home string) []string {
 		}
 		if _, err := mode.Load(home, e.Name()); err != nil {
 			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// modeDocFindings flags a mode whose docs name a template that does not exist,
+// builtin or under ~/.kovan/templates. Nothing catches this until an agent is
+// started or edited, and the error then names an internal path.
+func modeDocFindings(home string) []config.Finding {
+	var out []config.Finding
+	for _, name := range mode.List(home) {
+		md, err := mode.Load(home, name)
+		if err != nil {
+			continue // already reported as an unloadable dir
+		}
+		for _, doc := range md.Docs {
+			if _, err := taskdoc.Template(doc, filepath.Join(home, "templates")); err != nil {
+				out = append(out, config.Finding{
+					Path: "modes/" + name + " docs: " + doc,
+					Note: "no such template, builtin or in ~/.kovan/templates; starting or editing an agent on this mode fails",
+				})
+			}
 		}
 	}
 	return out

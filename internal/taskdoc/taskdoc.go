@@ -65,6 +65,12 @@ func BriefTemplate(templatesDir string) (string, error) {
 	return templateFor(Brief, templatesDir)
 }
 
+// Template resolves one doc name the way Scaffold will, so a caller can check a
+// mode's docs before an agent depends on them.
+func Template(name, templatesDir string) (string, error) {
+	return templateFor(name, templatesDir)
+}
+
 // Substitute fills a template's {{id}}/{{title}} placeholders (and the optional
 // token) — exported so the in-form brief is written the same way Scaffold writes.
 func Substitute(tmpl, id, title, token string) string {

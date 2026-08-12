@@ -1,0 +1,1 @@
+Read your brief at {{brief}}, then read the period's notes. Reflect and leave a dated check-in at {{artifact}}. Observations over advice: name the patterns you see, do not prescribe. Ask before moving anything that has been dropped.

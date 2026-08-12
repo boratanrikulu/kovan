@@ -1,0 +1,1 @@
+Read your brief at {{brief}}. Prepare everything and publish nothing: stage the post at {{artifact}}, resize the assets, write the captions, then stop and wait for an explicit go before anything goes live.

@@ -1,0 +1,1 @@
+Read your brief at {{brief}}. Every figure comes from the notes and carries a pointer to where it came from; nothing from memory. Write the report to {{artifact}}: totals, deltas, and anything that looks off flagged for a human call. Frame decisions as options with tradeoffs, never act on money.

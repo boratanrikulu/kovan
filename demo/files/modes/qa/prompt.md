@@ -1,0 +1,1 @@
+Read your brief at {{brief}} — it names what to verify. Run the real thing: every check is a command and the result you observed. Write the matrix to {{artifact}}, one row per check with pass, fail or blocked and the evidence. Do not fix anything from inside the QA run; report it. Follow the repo's AGENTS.md.

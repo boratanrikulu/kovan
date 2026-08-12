@@ -1,0 +1,5 @@
+posture: read-only
+docs:
+  - check-in.md
+write_paths:
+  - mentor/

@@ -1,0 +1,5 @@
+posture: read-only
+docs:
+  - report.md
+write_paths:
+  - finance/

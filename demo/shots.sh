@@ -46,7 +46,7 @@ PROFILE="${KOVAN_SHOT_PROFILE:-Default}"
 
 # --- fresh binary + demo -----------------------------------------------------
 make -C "$REPO_DIR" build >/dev/null
-sh "$SCRIPT_DIR/seed.sh" >/dev/null
+"$BIN" demo --root "$DEMO_ROOT" --seed-only >/dev/null
 echo "seeded; shooting within the 2-minute summary-freshness window"
 
 # --- open the cockpit window (returns the iTerm2 window id) -------------------
@@ -66,7 +66,7 @@ OSA
 
 cleanup() {
 	osascript -e "tell application \"iTerm2\" to close (windows whose id is $WINID)" 2>/dev/null || true
-	if [ "${KOVAN_SHOT_TEARDOWN:-0}" = "1" ]; then sh "$SCRIPT_DIR/teardown.sh" >/dev/null 2>&1 || true; fi
+	if [ "${KOVAN_SHOT_TEARDOWN:-0}" = "1" ]; then "$BIN" demo --root "$DEMO_ROOT" --remove >/dev/null 2>&1 || true; fi
 }
 trap cleanup EXIT INT TERM
 

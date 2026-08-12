@@ -48,6 +48,7 @@ func init() {
 		&cobra.Group{ID: "agents", Title: "Agents:"},
 		&cobra.Group{ID: "method", Title: "Method:"},
 	)
+	demoCmd.GroupID = "setup"
 	setupCmd.GroupID = "setup"
 	initCmd.GroupID = "setup"
 	doctorCmd.GroupID = "setup"
@@ -67,6 +68,7 @@ func init() {
 	}
 
 	rootCmd.AddCommand(
+		demoCmd,
 		setupCmd,
 		initCmd,
 		doctorCmd,

@@ -12,27 +12,53 @@ inherits it, gates enforce it, and task knowledge survives long after the
 agent is gone. Around that core, agents run in isolated worktrees, stay
 detached in tmux, and are watched from a single terminal cockpit.
 
-One Go binary. No daemon. No custom runtime.
+One binary. No daemon. No custom runtime.
 Kovan doesn't replace Claude Code. It gives it a durable operating environment.
 
-![the method stack one agent runs under](docs/img/method.png)
-*Every agent is born into this: your global rules, account voice, domain
-knowledge, mode workflow, project context, task brief — composed live, plus
-the gates that hold it all.*
+![the board: every agent, every project, one screen](docs/img/needs-you.png)
+*Ten agents across seven projects, each in its own worktree and its own tmux
+session. Two are paused: full auto-mode, and they still stopped at a decision
+that is yours. The mode column is the other half of the story. `code`,
+`review`, `write` and `analyze` ship with kovan; `qa`, `publish`, `finance`
+and `mentor` are ones this user added, a directory each. Same machinery,
+different method.*
 
 ## what you get
 
 - **your method, everywhere.** rules live once under `~/.kovan` in layers
   (global, per-account, per-domain, per-repo) and compose into every agent via
   `@import`. edit a layer file, every agent picks it up live. modes aren't
-  code-only: the same machinery runs a mentor or a finance agent.
-- **gates that hold in auto-mode.** `git push`, PR creation, commits on main:
-  escalated to you as Claude Code hooks, which fire in every permission mode.
-  prose rules slip; hooks don't. your own gates are
-  [regex patterns in config](docs/configuration.md#gates) today.
+  code-only: `code`, `review`, `write` and `analyze` ship, and a new mode is a
+  directory with a method file and a posture, so the same machinery runs a QA
+  or a finance agent.
+- **gates that hold in auto-mode.** escalated to you as Claude Code hooks,
+  which fire in every permission mode. prose rules slip; hooks don't. the
+  built-ins and your own rules live in one place, `~/.kovan/config.yaml`:
+
+  ```yaml
+  gates:
+    push: ask                    # git push, gh pr create, writes to the GitHub API
+    default_branch:
+      action: ask                # git commit on main or master
+    read_only: ask               # a read-only mode editing the repo
+    patterns:
+      - match: "docker push"     # and your own, as regex
+        action: ask              # stop, hand the decision to you
+      - match: "npm publish"
+        action: deny             # refuse outright, no prompt
+  ```
+
+  patterns run per command segment, after quoting, `sudo`, `env` and
+  `bash -c` are peeled off. [configuration](docs/configuration.md#gates) has
+  the rest, including what the matcher cannot see.
 - **tasks that remember.** every task gets a brief, a spec, and a learnings
   file in a durable store outside the worktree. agents come and go, the notes
   accumulate.
+
+![the method stack one agent runs under](docs/img/method.png)
+*Every agent is born into this: your global rules, account voice, domain
+knowledge, mode workflow, project context, task brief, composed live, plus
+the gates that hold it all.*
 
 ## why not just a multiplexer
 
@@ -44,10 +70,6 @@ after the demo: you never re-teach an agent your rules, auto-mode can't push
 without you, and what an agent learned outlives its worktree. If you want
 many providers in one view, use a multiplexer. If you want your agents to
 work your way, this is that.
-
-![an autonomous agent paused at a decision](docs/img/needs-you.png)
-*Full auto-mode, and still: the agent hits a decision that is yours, the row
-flips to needs-you, the summary tells you what it wants before you open it.*
 
 The [design doc](docs/design.md) walks the whole machine: how one method
 reaches every agent, and why enforcement is hooks, not prose.
@@ -82,15 +104,17 @@ do.
 
 ## demo in 60 seconds
 
-No tokens, no agents — a seeded fake fleet to walk the cockpit:
+No tokens, no agents, no Claude account. One command seeds a fake fleet and
+opens the board on it:
 
 ```sh
-git clone https://github.com/boratanrikulu/kovan && cd kovan
-./demo/seed.sh
-KOVAN_HOME=/tmp/kovan-demo/home kovan
+kovan demo
 ```
 
-(`./demo/teardown.sh` removes every trace.)
+Ten agents across seven throwaway repos, each with its own worktree and tmux
+session, so every key on the board does what it does for real. Your `~/.kovan`
+and your own repos are never touched. `kovan demo --remove` deletes every
+trace.
 
 ## quickstart
 

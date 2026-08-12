@@ -1,8 +1,8 @@
 // Package mode loads task modes: the per-task working style selected at start —
 // the opening prompt, the posture (whether it edits the repo), and the output
 // docs it scaffolds. Built-in modes are embedded; a directory of the same name
-// under ~/.kovan/modes/ overrides one, so a mode is tuned or added with no
-// recompile.
+// under ~/.kovan/modes/ layers over one file by file, so a mode is tuned or
+// added with no recompile and retuning one part leaves the others alone.
 package mode
 
 import (
@@ -80,25 +80,49 @@ type config struct {
 	WritePaths []string `yaml:"write_paths"`
 }
 
-// Load returns the named mode, preferring ~/.kovan/modes/<name>/ over the
-// built-in of the same name. An empty name resolves to Default.
+// Load returns the named mode: the built-in of that name with whatever the user
+// dropped in ~/.kovan/modes/<name>/ layered on top. The overlay is per file, and
+// inside mode.yaml per field, so retuning one part of a shipped mode never
+// silently resets the others: a new prompt.md on review keeps it read-only. An
+// empty name resolves to Default.
 func Load(home, name string) (*Mode, error) {
 	if name == "" {
 		name = Default
 	}
-	if prompt, cfg, ok, err := readDir(filepath.Join(home, "modes", name)); err != nil {
-		return nil, err
-	} else if ok {
-		return assemble(name, prompt, cfg), nil
-	}
-	prompt, cfg, ok, err := readEmbed(name)
+	prompt, cfg, isBuiltin, err := readEmbed(name)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	userPrompt, userCfg, has, err := readDir(filepath.Join(home, "modes", name))
+	if err != nil {
+		return nil, err
+	}
+	if !isBuiltin && !has.prompt {
 		return nil, fmt.Errorf("unknown mode %q (see ~/.kovan/modes or the built-ins)", name)
 	}
+	if has.prompt {
+		prompt = userPrompt
+	}
+	if has.config {
+		cfg = overlay(cfg, userCfg)
+	}
 	return assemble(name, prompt, cfg), nil
+}
+
+// overlay applies the fields a user's mode.yaml actually sets on top of the
+// built-in's. A missing list keeps the built-in's; an explicit empty list
+// (`docs: []`) means none.
+func overlay(base, over config) config {
+	if over.Posture != "" {
+		base.Posture = over.Posture
+	}
+	if over.Docs != nil {
+		base.Docs = over.Docs
+	}
+	if over.WritePaths != nil {
+		base.WritePaths = over.WritePaths
+	}
+	return base
 }
 
 // List returns the available mode names: the built-ins plus any user modes under
@@ -147,21 +171,27 @@ func assemble(name, prompt string, cfg config) *Mode {
 	return &Mode{Name: name, Prompt: strings.TrimSpace(prompt), Posture: posture, Docs: cfg.Docs, WritePaths: cfg.WritePaths}
 }
 
-// readDir reads a mode from a directory on disk; ok is false when the dir has no
-// prompt.md (so the caller falls back to the built-in). mode.yaml is optional.
-func readDir(dir string) (prompt string, cfg config, ok bool, err error) {
+// present records which files a user's mode dir actually carries, so Load
+// overlays those and leaves the rest to the built-in.
+type present struct{ prompt, config bool }
+
+// readDir reads what a user mode directory holds. Both files are optional and a
+// missing directory is not an error: the caller decides whether the built-in
+// alone is enough.
+func readDir(dir string) (prompt string, cfg config, has present, err error) {
 	p, err := os.ReadFile(filepath.Join(dir, "prompt.md"))
-	if os.IsNotExist(err) {
-		return "", config{}, false, nil
+	switch {
+	case err == nil:
+		prompt, has.prompt = string(p), true
+	case !os.IsNotExist(err):
+		return "", config{}, present{}, fmt.Errorf("read mode prompt %s: %w", dir, err)
 	}
+	cfg, found, err := readConfig(os.ReadFile, filepath.Join(dir, "mode.yaml"))
 	if err != nil {
-		return "", config{}, false, fmt.Errorf("read mode prompt %s: %w", dir, err)
+		return "", config{}, present{}, err
 	}
-	cfg, err = readConfig(os.ReadFile, filepath.Join(dir, "mode.yaml"))
-	if err != nil {
-		return "", config{}, false, err
-	}
-	return string(p), cfg, true, nil
+	has.config = found
+	return prompt, cfg, has, nil
 }
 
 func readEmbed(name string) (prompt string, cfg config, ok bool, err error) {
@@ -169,27 +199,26 @@ func readEmbed(name string) (prompt string, cfg config, ok bool, err error) {
 	if err != nil {
 		return "", config{}, false, nil
 	}
-	cfg, err = readConfig(builtin.ReadFile, "builtin/"+name+"/mode.yaml")
+	cfg, _, err = readConfig(builtin.ReadFile, "builtin/"+name+"/mode.yaml")
 	if err != nil {
 		return "", config{}, false, err
 	}
 	return string(p), cfg, true, nil
 }
 
-// readConfig decodes a mode.yaml via the given reader; a missing file yields the
-// zero config (so mode.yaml is optional). errors.Is(fs.ErrNotExist) covers both
-// the os and embed.FS "not found" cases.
-func readConfig(read func(string) ([]byte, error), path string) (config, error) {
+// readConfig decodes a mode.yaml via the given reader; found is false when the
+// file is absent, which is not an error (mode.yaml is optional).
+// errors.Is(fs.ErrNotExist) covers both the os and embed.FS "not found" cases.
+func readConfig(read func(string) ([]byte, error), path string) (cfg config, found bool, err error) {
 	data, err := read(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return config{}, nil
+			return config{}, false, nil
 		}
-		return config{}, fmt.Errorf("read mode config %s: %w", path, err)
+		return config{}, false, fmt.Errorf("read mode config %s: %w", path, err)
 	}
-	var c config
-	if err := yaml.Unmarshal(data, &c); err != nil {
-		return config{}, fmt.Errorf("parse mode config %s: %w", path, err)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return config{}, false, fmt.Errorf("parse mode config %s: %w", path, err)
 	}
-	return c, nil
+	return cfg, true, nil
 }

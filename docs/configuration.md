@@ -10,6 +10,7 @@ override them.
 Jump to: [global config](#kovanconfigyaml) ·
 [per-repo config](#kovanprojectsrepoconfigyaml) ·
 [checking your config](#checking-your-config) ·
+[agent CLIs](#agent-clis) ·
 [accounts](#accounts) ·
 [gates](#gates) ·
 [method layers](#method-layers) ·
@@ -27,7 +28,8 @@ mostly useful for tests and experiments.
 | key | default | what it does |
 |---|---|---|
 | `runner` | `tmux` | how agents run (tmux is the only runner today) |
-| `agent` | `claude` | the agent CLI kovan launches |
+| `agent` | `claude` | the default agent CLI: `claude` or `codex`, see [agent CLIs](#agent-clis) |
+| `agents.<cli>.command` | the CLI's name | the binary to launch for that CLI, a name on PATH or a path |
 | `notify` | `macos` | desktop notifications; any other value disables them |
 | `author` | git `user.name` | the `{author}` in branch names |
 | `tmux.options` | `mouse on`, `history-limit 50000` | applied to each agent session, session-scoped; setting the list replaces the defaults |
@@ -35,8 +37,9 @@ mostly useful for tests and experiments.
 | `apps.editor` | `code` | board `e` opens this on the worktree |
 | `apps.merge` | `smerge` | board `s` |
 | `apps.terminal` | (empty) | board `t`; empty opens a new iTerm2 tab on macOS |
-| `monitor.model` | `opus` | model for the one-shot summaries |
-| `accounts` | (none) | named Claude accounts, see [accounts](#accounts) |
+| `monitor.model` | `opus` | model for Claude's one-shot summaries |
+| `monitor.models.<cli>` | (none) | model for that CLI's summaries; wins over `monitor.model` (e.g. `codex: gpt-5.5`) |
+| `accounts` | (none) | named accounts, see [accounts](#accounts) |
 | `default_account` | (none) | account used when nothing else picks one |
 | `default_mode` | `code` | task mode when neither repo nor flag sets one |
 
@@ -52,7 +55,8 @@ Keyed by the repo name (the checkout's basename).
 | `worktree.id_pattern` | (none) | regexp validating a typed id (a blank id still auto-generates) |
 | `task.dir` | `works` | task-doc folder under `~/.kovan/projects/<repo>/` |
 | `task.token` | (none) | placeholder in templates substituted with the id (e.g. `TASK-XXXXX`) |
-| `account` | (none) | default Claude account for this repo's agents |
+| `account` | (none) | default account for this repo's agents |
+| `agent` | (none) | default agent CLI for this repo's agents |
 | `domain` | (none) | method domain layer to compose (e.g. `code`, `writing`) |
 | `mode` | (none) | default task mode for this repo |
 | `color` | (none) | default board stripe color for this repo's agents |
@@ -93,10 +97,39 @@ by the fresh template without questions. The original is saved next to the
 file as `.bak` before anything is written. Values you set are never changed,
 so anything under "check values" stays yours to fix.
 
+## Agent CLIs
+
+kovan runs Claude Code (`claude`) and Codex (`codex`). Each agent picks one:
+`kovan start --agent codex` (or the new-agent form's agent field) > the repo's
+`agent:` > the global `agent:` > `claude`. The board's AGENT column shows which
+runs where, and the edit modal (`c`) moves a running agent to the other CLI.
+
+Both CLIs get the same method, gates and board. Where they differ:
+
+| | Claude Code | Codex |
+|---|---|---|
+| method | `--append-system-prompt`, composed at each launch | `-c developer_instructions`, composed at each launch |
+| gates | `ask`: Claude Code prompts you | `deny`: Codex can't ask from a hook; reply `kovan-allow` to let the command through once |
+| needs-you | the permission prompt notification | a pending approval (`PermissionRequest`) |
+| session id | kovan picks it at start | Codex picks it; kovan records it from the first hook |
+| accounts | a token file per account | a `CODEX_HOME` per account |
+| hooks | `~/.claude/settings.json` | `hooks.json` in each `CODEX_HOME`, trusted once in `/hooks` |
+| skills | `.claude/skills`, `~/.claude/skills` | `.agents/skills`, `~/.agents/skills` |
+
+**Switching an agent's CLI.** Pick another agent in the edit modal and save.
+The conversation can't move between CLIs, so kovan first has the old CLI write
+`handoff.md` into the task docs (done, decided, open, next; the raw last turns
+if that summary fails). Then it stops the session and starts the new CLI in
+the same worktree on a takeover prompt: read the brief and the handoff, check
+the git state, report where things stand and wait for your go. The worktree,
+the branch, uncommitted changes, task docs and method all stay. Each CLI's
+conversation is kept, so switching back resumes the old one.
+
 ## Accounts
 
-Run agents under different Claude accounts on one machine, regardless of
-which one is logged in.
+Run agents under different accounts on one machine, regardless of which one
+is logged in. An account belongs to one agent CLI (`agent:`, default
+`claude`); the pickers only offer the accounts of the agent's CLI.
 
 ```yaml
 accounts:
@@ -111,8 +144,25 @@ the file at exec time, so the value never appears in argv, logs, or the
 manifest. A missing or group/world-readable token file is a hard error that
 refuses to spawn.
 
+A Codex account is a home of its own instead of a token: `home` becomes the
+agent's `CODEX_HOME`, which holds its login, its sessions and its hooks. Log in
+once per home, then run `kovan setup` to install the hooks there:
+
+```yaml
+accounts:
+  openai:
+    agent: codex
+    home: ~/.kovan/codex/openai
+```
+
+```sh
+CODEX_HOME=~/.kovan/codex/openai codex login
+kovan setup
+```
+
 Resolution order: `kovan start --account X` > the repo's `account:` >
-`default_account` > whatever account is logged in. The monitor's summarizers
+`default_account` > whatever account is logged in. A default that belongs to
+another CLI doesn't apply; the agent runs under its own CLI's login. The monitor's summarizers
 run under each agent's own account too, so summary cost lands on the right
 plan.
 
@@ -144,16 +194,42 @@ A gate is the point where an agent has to stop and hand a decision back to
 you. Prose in a method file asks an agent to behave; a gate makes the
 behaviour structural.
 
-Gates run as a Claude Code `PreToolUse` hook, wired once by `kovan setup`.
-That matters: hooks fire in **every permission mode**, including full
-auto-mode, so a detached agent hits the same gate as a supervised one. The
-hook only ever emits `ask` or `deny`. It never emits `allow`, so it can
-tighten your setup and never loosen it. For any Claude session that is not a
-kovan agent, the hook exits silently.
+Gates run as the agent CLI's pre-tool hook (`PreToolUse`), wired once by
+`kovan setup`. That matters: hooks fire in **every permission mode**,
+including full auto-mode, so a detached agent hits the same gate as a
+supervised one. The hook only ever emits `ask` or `deny`. It never emits
+`allow`, so it can tighten your setup and never loosen it. For any session
+that is not a kovan agent, the hook exits silently.
 
-`ask` is the default everywhere. The agent pauses, Claude Code shows your
-reason, and the board flips that row to `needs-you` with the summary telling
-you what it wants before you open the session.
+`ask` is the default everywhere. Under Claude Code the agent pauses, Claude
+Code shows your reason, and the board flips that row to `needs-you` with the
+summary telling you what it wants before you open the session. Codex has no
+`ask` for hooks (it treats one as a failed hook and runs the command), so under
+Codex an `ask` gate denies instead, and the reason quotes the command:
+"`git push origin main` needs your approval. Reply with kovan-allow to allow
+it once." kovan records that command as pending. Your next message in the chat
+that contains `kovan-allow` (any case, anywhere in the message) lets that one
+command through once, in the turn your message starts:
+
+```
+› push it
+• git push origin main      ✗ `git push origin main` needs your approval…
+› kovan-allow
+• git push origin main      ✓ pushed
+› push again
+• git push origin main      ✗ needs your approval… (each run needs its own)
+```
+
+A plain "go" approves nothing, and only your own messages in that
+conversation count: a prompt from a Codex sub-agent, or from a CLI the agent
+runs inside its tab, approves nothing. Another gated command replaces the
+pending one (a `deny` pattern touches no pass). An approval the turn does not
+use ends with the turn, and your next message without the word takes it back
+(say you pressed Esc first). A
+fresh session starts with nothing pending. A `deny` pattern stays a deny,
+approval or not, and wins over the ask for any other part of the same command:
+`git push && terraform destroy` is denied outright when `terraform destroy` is.
+The manifest keeps only a digest of the pending command, never its text.
 
 ```yaml
 gates:
@@ -167,8 +243,9 @@ gates:
 ```
 
 Every built-in takes `ask` or `off`, nothing else. `off` disables that gate
-outright. Only your own `patterns` can `deny`; kovan itself never refuses a
-command on your behalf.
+outright. Under Claude Code only your own `patterns` can `deny`; kovan itself
+never refuses a command on your behalf. Under Codex an `ask` arrives as a deny,
+for the reason above.
 
 ### The built-in gates
 
@@ -220,30 +297,26 @@ gates:
 - A regexp that does not compile is skipped, never fatal. A typo in config
   must not wedge every tool call the agent makes.
 
-### Order, and why your pattern may not fire
+### Order: a deny always wins
 
-Within a segment the built-ins are checked first, patterns last, and the
-first match wins. So with the default `push: ask`, a pattern like
-`match: "push --force"` with `action: deny` never runs: `git push` already
-matched the built-in and returned `ask`.
-
-If you want a hard `deny` on something a built-in already covers, turn that
-built-in off and own the whole rule:
+A `deny` pattern wins over every `ask`, wherever it sits: over a built-in
+(`match: "push --force"` with `action: deny` denies `git push --force` even
+with `push: ask` on), over an `ask` pattern listed before it, and over an
+`ask` for another part of the same command (`git push && terraform destroy`
+is denied when `terraform destroy` is). Among asks, the built-ins come first,
+then your `ask` patterns in their listed order; the first one names the
+reason.
 
 ```yaml
 gates:
-  push: off
   patterns:
     - match: 'git push .*--force'
       action: deny
       reason: "kovan: force push is mine to run"
-    - match: "git push"
-      action: ask
 ```
 
-Patterns aimed at commands no built-in touches (`docker`, `npm`, `psql`,
-`terraform`, your deploy script) have nothing to compete with and fire
-normally.
+This matters most under Codex, where an `ask` is something `kovan-allow` lets
+through once: the deny never is.
 
 ### How a command is read
 
@@ -285,23 +358,28 @@ against an adversarial process, use OS-level sandboxing.
 
 ## Method layers
 
-Your method lives under `~/.kovan` and composes into every agent via
-`@import`, most general first:
+Your method lives under `~/.kovan` and kovan composes it into every agent at
+each launch, most general first, the same way for every agent CLI:
 
 | layer | path | reaches |
 |---|---|---|
-| global | `~/.kovan/method/global/*.md` | every agent (via `~/.claude/CLAUDE.md`) |
+| global | `~/.kovan/method/global/*.md` | every agent (and, after `kovan method link`, every Claude Code session via `~/.claude/CLAUDE.md`) |
 | account | `~/.kovan/method/accounts/<acct>/*.md` | agents on that account |
 | domain | `~/.kovan/method/domains/<domain>/*.md` | repos that set `domain:` |
 | project (private) | `~/.kovan/projects/<repo>/*.md` | that repo's agents, never committed |
 | mode | `~/.kovan/modes/<mode>/method.md` | agents running that task mode |
 | project (public) | the repo's own `CLAUDE.md`/`AGENTS.md` | committed, kovan leaves it alone |
 
-Editing a layer file propagates live; there is no sync or copy step. Skills
-work the same way: drop one under any layer's `skills/<name>/` and kovan
-symlinks it where Claude looks, without clobbering anything already there.
+The composed text goes to the CLI as part of its system prompt (each file
+under a heading with its path, `@import`s expanded), so nothing lands in the
+worktree. A layer edit reaches an agent on its next wake; there is no sync or
+copy step. A file the CLI already loads itself is left out, so a Claude agent
+doesn't get the global layer twice once `kovan method link` has wired it into
+`~/.claude/CLAUDE.md`. Skills work the same way: drop one under any layer's
+`skills/<name>/` and kovan symlinks it where each CLI looks (`.claude/skills`
+and `.agents/skills`), without clobbering anything already there.
 `kovan method` opens the inspector showing exactly which files govern a
-selected agent, with `e` to edit and `E` to hand the file to Claude.
+selected agent, with `e` to edit and `E` to hand the file to your default agent CLI.
 
 <!-- TODO(bora): screenshot of the method inspector with a few layers open. -->
 

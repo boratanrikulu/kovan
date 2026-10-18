@@ -13,7 +13,9 @@ sudo dpkg -i kovan_*_linux_amd64.deb           # Linux
 Linux gets `.deb` / `.rpm` / `.apk` packages on the
 [releases](https://github.com/boratanrikulu/kovan/releases) page.
 
-Prerequisites on PATH: `git`, `tmux`, and the `claude` CLI (Claude Code).
+Prerequisites on PATH: `git`, `tmux`, and an agent CLI: `claude` (Claude
+Code), `codex` (Codex), or both. `agent:` in `~/.kovan/config.yaml` picks the
+default; each agent can pick its own.
 macOS additionally gets desktop notifications and clipboard-image paste in
 the brief editor; Linux runs fine without both.
 
@@ -23,12 +25,19 @@ the brief editor; Linux runs fine without both.
 kovan setup
 ```
 
-This merges a single kovan hook into `~/.claude/settings.json` (backed up
-first, idempotent, your existing hooks and settings untouched). The hook is
-how the board knows what every agent is doing: it stamps live state
+This merges a single kovan hook into each agent CLI's hooks file (backed up
+first, idempotent, your existing hooks and settings untouched):
+`~/.claude/settings.json` for Claude Code, and `hooks.json` in `~/.codex` and
+in every Codex account's home when Codex is installed or has an account. The
+hook is how the board knows what every agent is doing: it stamps live state
 (`working` / `needs-you` / `idle`) into each agent's manifest and enforces
 the gates. It resolves whether a session belongs to kovan and leaves every
-other Claude session alone.
+other session alone.
+
+Codex runs a new hook only once you trust it: open `codex` once with that home
+and approve kovan's hook in `/hooks`. Until then a Codex agent runs ungated
+and the board can't see its state. `kovan doctor` reports hooks that are
+missing.
 
 ## Onboard a repo
 
@@ -40,7 +49,7 @@ kovan init
 kovan does the boring half itself: scaffolds `~/.kovan` (a fully commented
 `config.yaml`), writes a commented per-repo starter to
 `~/.kovan/projects/<repo>/config.yaml` (the repo itself stays clean), and
-installs the hooks if you skipped `setup`. Then it launches Claude in the
+installs the hooks if you skipped `setup`. Then it launches your default agent CLI in the
 repo with one job: read your existing AI files (`CLAUDE.md`, `AGENTS.md`,
 scattered rules) and propose how they split into layers, universal rules
 into the global method, private per-repo notes into the kovan store, public
@@ -85,7 +94,8 @@ Same thing, except the brief opens in `$EDITOR`. Useful flags:
 | flag | what it does |
 |---|---|
 | `--mode review` | task mode: `code` (default), `review`, `analyze`, `write` |
-| `--account personal` | which Claude account the agent runs under |
+| `--agent codex` | the agent CLI: `claude` or `codex` (default: the repo's, then the global `agent:`) |
+| `--account personal` | which account the agent runs under (one of that CLI's) |
 | `--from origin/release` | base branch for the new worktree |
 | `--quick` | skip the brief, run the title as the goal |
 | `--in-place` | run in this checkout, no separate worktree |
@@ -118,11 +128,11 @@ The keys that matter:
 | key | action |
 |---|---|
 | `j`/`k`, hover | move (the peek and summary follow) |
-| `enter`, double-click | open the agent's own Claude TUI; detach returns here |
+| `enter`, double-click | open the agent's own TUI (Claude Code or Codex); detach returns here |
 | `n` | new agent |
 | `S` | the monitor page: every running agent with its full summary |
 | `m` | the method inspector: the exact files an agent runs under |
-| `c` | edit an agent (title, mode, account, color) |
+| `c` | edit an agent (title, mode, agent CLI, account, color); a new agent CLI restarts it with a handoff note |
 | `/` | filter, `tab` active/archived, `p` pin, `a` archive |
 | `v` | choose and reorder the board's columns (kept across restarts) |
 | `e` `s` `t` `w` | open editor / git GUI / terminal / task notes on the agent |

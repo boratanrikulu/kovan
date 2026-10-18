@@ -24,7 +24,7 @@ one needs you.
 │    projects/<repo>/     private per-repo notes, never public │
 │    modes/<name>/        task workflows (prompt + posture)    │
 └───────────────────────────┬──────────────────────────────────┘
-                            │ composed via @import, live
+                            │ composed at each launch
         ┌───────────────────┼────────────────────┐
      your-app/           your-lib/            your-notes/
      CLAUDE.md           CLAUDE.md            (non-coding
@@ -59,17 +59,22 @@ is yours.
 
 ## Method delivery
 
-kovan never copies or renders your method; it links it, so an edit
-propagates live:
+Your method files stay where you edit them. kovan reads them at every launch
+and hands them to the agent CLI, the same way for Claude Code and Codex:
 
-- The global layer is `@import`ed into `~/.claude/CLAUDE.md` (a
+- At each start and wake, kovan composes the agent's task block (its brief,
+  its mode's protocol, its workspaces) and the content of every layer file
+  that applies to it into one text, and passes it as part of the CLI's system
+  prompt: `--append-system-prompt` for Claude Code, `developer_instructions`
+  for Codex. Nothing lands in the worktree, and an edit reaches the agent on
+  its next wake.
+- The global layer can also be `@import`ed into `~/.claude/CLAUDE.md` (a
   sentinel-marked block that `kovan method link` maintains, never clobbering
-  your own content).
-- When an agent is scaffolded, its worktree's `CLAUDE.local.md` gets
-  `@import` lines for the resolved account, domain, and per-repo layers, plus
-  its mode's method file, and a pointer to its task brief.
-- Skills are symlinked, never copied: global ones into `~/.claude/skills/`,
-  scoped ones into the worktree, no-clobber in both directions.
+  your own content), so plain Claude Code sessions outside kovan get it too.
+  The compose then leaves it out for Claude agents, which already load it.
+- Skills are symlinked, never copied: global ones into `~/.claude/skills/` and
+  `~/.agents/skills/`, scoped ones into the worktree's `.claude/skills` and
+  `.agents/skills`, no-clobber in both directions.
 
 Effective context = global + account + domain + project-private +
 project-public (the repo's own committed files) + the task brief. Most
@@ -98,22 +103,24 @@ each piece exactly once, in one place.
 
 ## The gate engine
 
-Claude Code's hooks call one command, `kovan gate run`, on five events
-(PreToolUse, PostToolUse, UserPromptSubmit, Notification, Stop). Every event
-observes: it keeps the agent's manifest state live, which is what the board
-renders. PreToolUse additionally enforces.
+Each agent CLI's hooks call one command, `kovan gate run`: Claude Code on
+PreToolUse, PostToolUse, UserPromptSubmit, Notification and Stop; Codex on
+the same plus SessionStart, with PermissionRequest standing in for the
+notification. A driver per CLI decodes its payload into one event shape.
+Every event observes: it keeps the agent's manifest state live, which is what
+the board renders. PreToolUse additionally enforces.
 
 ```
-  Claude Code ──hook JSON──▶ kovan gate run
+  agent CLI ──hook JSON──▶ kovan gate run --agent <cli>
                                 │
-                    resolve agent (session id, cwd)
+                    resolve agent (session id, KOVAN_SESSION, cwd)
                     not a kovan agent? ──▶ exit 0, untouched
                                 │
                     update manifest state ──▶ board, notifications
                                 │
                     PreToolUse? evaluate gates
                                 │
-              match ──▶ {"permissionDecision": "ask", reason}
+              match ──▶ {"permissionDecision": "ask", reason}   (Codex: "deny")
               no match ──▶ exit 0 (normal permission flow)
 ```
 
@@ -125,7 +132,8 @@ That's the whole thesis: prose rules slip; hooks don't.
 Properties worth knowing:
 
 - kovan never emits `allow`, so it can only add friction, never remove your
-  own prompts. Every built-in defaults to `ask`; any error inside the hook is
+  own prompts. Every built-in defaults to `ask` (a deny under Codex, which
+  cannot ask from a hook); any error inside the hook is
   recovered to exit 0, because a kovan bug must never block a tool call.
 - The Bash matcher splits commands on chains, subshells, and grouping, and
   peels quotes, env prefixes, binary paths, `bash -c`, and wrappers like
@@ -164,7 +172,7 @@ need me" without opening a single session:
 ```
   agent's session transcript ──▶ digest (real turns + tool calls only)
                                     │
-              one-shot claude -p (under the agent's own account)
+              one-shot run of the agent's own CLI (under its own account)
                                     │
               board strip + S page + the agent's manifest
 ```
@@ -184,11 +192,12 @@ status from the session index.
   the judgment work.
 - **No embedded LLM.** The binary never calls a model API. The one exception
   in spirit, the monitor, launches the agent CLI you already have.
-- **No sync engine.** The method propagates by `@import` and symlinks. There
-  is nothing to rebuild, regenerate, or drift.
+- **No sync engine.** The method is read from its files at every launch and
+  skills are symlinks. The composed text is a launch artifact, rebuilt every
+  time and never edited, so there is no copy to drift.
 - **tmux is the runner.** A pty multiplexer can detach and reattach an
   interactive TUI; OS job control can't. The runner is behind an interface,
-  and the agent CLI is a config value: Claude Code today, Codex next.
+  and so is the agent CLI: a small driver each for Claude Code and Codex.
 - **Enforcement is hooks, not prose.** Anything that must hold in auto-mode
   lives as a hook; CLAUDE.md shapes behavior but blocks nothing.
 - **Personal-first.** kovan changes as fast as the agent tooling world does.

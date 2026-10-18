@@ -13,7 +13,8 @@ agent is gone. Around that core, agents run in isolated worktrees, stay
 detached in tmux, and are watched from a single terminal cockpit.
 
 One binary. No daemon. No custom runtime.
-Kovan doesn't replace Claude Code. It gives it a durable operating environment.
+Kovan doesn't replace your agent CLI. It gives Claude Code or Codex a durable
+operating environment, and you pick which one runs each task.
 
 ![the board: every agent, every project, one screen](docs/img/needs-you.png)
 *Ten agents across seven projects, each in its own worktree and its own tmux
@@ -26,13 +27,16 @@ different method.*
 ## what you get
 
 - **your method, everywhere.** rules live once under `~/.kovan` in layers
-  (global, per-account, per-domain, per-repo) and compose into every agent via
-  `@import`. edit a layer file, every agent picks it up live. modes aren't
+  (global, per-account, per-domain, per-repo) and kovan composes them into
+  every agent's system prompt at launch, the same way for every CLI. edit a
+  layer file, every agent picks it up on its next wake. modes aren't
   code-only: `code`, `review`, `write` and `analyze` ship, and a new mode is a
   directory with a method file and a posture, so the same machinery runs a QA
   or a finance agent.
-- **gates that hold in auto-mode.** escalated to you as Claude Code hooks,
-  which fire in every permission mode. prose rules slip; hooks don't. the
+- **gates that hold in auto-mode.** enforced through the agent CLI's own hooks,
+  which fire in every permission mode. Claude Code asks you; Codex can only
+  deny, so you let the command through once by replying `kovan-allow`.
+  prose rules slip; hooks don't. the
   built-ins and your own rules live in one place, `~/.kovan/config.yaml`:
 
   ```yaml
@@ -97,14 +101,15 @@ go install github.com/boratanrikulu/kovan/cmd/kovan@latest
 
 Prebuilt tarballs (darwin/linux, amd64/arm64) are on the same releases page.
 
-You need `git`, `tmux`, and the `claude` CLI on PATH. Claude Code is the
-supported agent today; Codex support is on the way. Desktop notifications and
+You need `git`, `tmux`, and an agent CLI on PATH: `claude` (Claude Code) or
+`codex` (Codex), or both. Each task picks its CLI, and a running task can move
+to the other one. Desktop notifications and
 clipboard-image paste are macOS; everything else works anywhere Go and tmux
 do.
 
 ## demo in 60 seconds
 
-No tokens, no agents, no Claude account. One command seeds a fake fleet and
+No tokens, no agents, no account. One command seeds a fake fleet and
 opens the board on it:
 
 ```sh
@@ -119,13 +124,13 @@ trace.
 ## quickstart
 
 ```sh
-kovan setup                # once per machine: wire the Claude Code hooks
+kovan setup                # once per machine: wire the hooks into each agent CLI
 cd your-repo
 kovan init                 # onboard the repo: sort its AI files into layers (or just set defaults if it has none)
 kovan                      # the board
 ```
 
-Press `n`. One form: id, title, project, where it runs, mode, account, and
+Press `n`. One form: id, title, project, where it runs, mode, agent, account, and
 the brief written inline (`ctrl+v` pastes a screenshot straight into it).
 `ctrl+d` submits; the agent spawns in its own worktree and starts working,
 detached.
@@ -163,7 +168,7 @@ steer, detach again.
 
 Personal infrastructure that happens to be public. I use it daily and evolve
 it with my own working method; breaking changes land whenever they make the
-tool better for me (0.x, no stability promises). Claude Code is the agent it
-drives today, with Codex support planned. Issues and PRs are welcome and I
+tool better for me (0.x, no stability promises). It drives Claude Code and
+Codex; another CLI is a driver away. Issues and PRs are welcome and I
 read everything, but support is best-effort and features that don't fit the
 philosophy will be kindly declined. Need stability? Pin a version or fork.

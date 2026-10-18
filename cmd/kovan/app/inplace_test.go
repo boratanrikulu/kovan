@@ -149,7 +149,7 @@ func TestStartAgentInPlace(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("KOVAN_HOME", home)
-	fake := filepath.Join(t.TempDir(), "fake")
+	fake := filepath.Join(t.TempDir(), "claude") // named after its driver
 	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\nsleep 60\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestStartAgentInPlace(t *testing.T) {
 	parent := filepath.Dir(repo)
 	before, _ := os.ReadDir(parent)
 
-	res, err := startAgent("ip1", "in-place goal", "feat/x", "", "", "", true, "")
+	res, err := startAgent("ip1", "in-place goal", startOpts{From: "feat/x", InPlace: true})
 	if err != nil {
 		t.Fatalf("startAgent in-place: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestStartAgentInPlace(t *testing.T) {
 	// A second agent on the same checkout joins as a tab: it shares the worktree
 	// and branch, is not in-place, and creates no new worktree dir.
 	t.Cleanup(func() { _, _ = removeAgent("ip2", true) })
-	res2, err := startAgent("ip2", "second", "", "", "", "", true, "")
+	res2, err := startAgent("ip2", "second", startOpts{InPlace: true})
 	if err != nil {
 		t.Fatalf("a second agent on the checkout should join as a tab, not be refused: %v", err)
 	}

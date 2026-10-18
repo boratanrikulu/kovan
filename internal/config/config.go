@@ -15,7 +15,8 @@ import (
 // Global is kovan's own settings, read from ~/.kovan/config.yaml.
 type Global struct {
 	Runner         string             `yaml:"runner"`
-	Agent          string             `yaml:"agent"`
+	Agent          string             `yaml:"agent"` // the default agent CLI: claude | codex
+	Agents         map[string]Agent   `yaml:"agents"`
 	Notify         string             `yaml:"notify"`
 	Author         string             `yaml:"author"`
 	Tmux           Tmux               `yaml:"tmux"`
@@ -27,10 +28,16 @@ type Global struct {
 	DefaultMode    string             `yaml:"default_mode"` // task mode when neither repo nor command sets one
 }
 
-// Monitor configures the cockpit's agent summaries: the model the one-shot
-// `claude -p` summarizer uses, each agent under its own account.
+// Agent overrides how one agent CLI is launched.
+type Agent struct {
+	Command string `yaml:"command"` // the binary; default: the agent's name on PATH
+}
+
+// Monitor configures the cockpit's agent summaries: the model each agent's
+// one-shot summarizer uses, under the agent's own account.
 type Monitor struct {
-	Model string `yaml:"model"` // e.g. opus | sonnet | haiku
+	Model  string            `yaml:"model"`  // claude's summarizer model: opus | sonnet | haiku
+	Models map[string]string `yaml:"models"` // per agent CLI, e.g. codex: gpt-5.5; wins over model
 }
 
 // Apps are the external programs the board opens against a selected agent's
@@ -42,10 +49,13 @@ type Apps struct {
 	Terminal string `yaml:"terminal"` // board key t; empty → a new iTerm2 tab on macOS
 }
 
-// Account is a Claude account an agent can run under. Its OAuth token lives in a
-// file (referenced, never inlined), read at launch.
+// Account is an account an agent can run under. A Claude account's OAuth token
+// lives in a file (referenced, never inlined), read at launch; a Codex account
+// is its own CODEX_HOME, logged in once.
 type Account struct {
+	Agent     string            `yaml:"agent"` // the agent CLI it belongs to; default claude
 	TokenFile string            `yaml:"token_file"`
+	Home      string            `yaml:"home"` // the CLI's home dir for this account (codex: CODEX_HOME)
 	Env       map[string]string `yaml:"env"`
 }
 
@@ -88,6 +98,7 @@ type Repo struct {
 	Worktree   Worktree `yaml:"worktree"`
 	Task       Task     `yaml:"task"`
 	Account    string   `yaml:"account"`     // default account for agents in this repo
+	Agent      string   `yaml:"agent"`       // default agent CLI for this repo
 	Domain     string   `yaml:"domain"`      // method domain (code/writing/…) for this repo
 	Mode       string   `yaml:"mode"`        // default task mode (code/review/…) for this repo
 	Color      string   `yaml:"color"`       // default board stripe color, a palette name
@@ -171,7 +182,15 @@ func LoadGlobal() (*Global, error) {
 	}
 	for name, acct := range g.Accounts {
 		acct.TokenFile = expandTilde(acct.TokenFile)
+		acct.Home = expandTilde(acct.Home)
+		if acct.Agent == "" {
+			acct.Agent = "claude"
+		}
 		g.Accounts[name] = acct
+	}
+	for name, a := range g.Agents {
+		a.Command = expandTilde(a.Command)
+		g.Agents[name] = a
 	}
 	return g, nil
 }
@@ -220,7 +239,10 @@ const globalTemplate = `# kovan's own settings. Every line below is commented: t
 # built-in defaults, so uncomment only what you want to override.
 
 # runner: tmux            # how agents are run (tmux)
-# agent: claude           # the agent CLI kovan launches
+# agent: claude           # the default agent CLI: claude | codex
+# agents:                 # per-CLI launch overrides
+#   codex:
+#     command: codex      # the binary; default: the name on PATH
 # notify: macos           # desktop notifications (macos)
 # author: ""              # branch author; falls back to git config user
 
@@ -229,7 +251,7 @@ const globalTemplate = `# kovan's own settings. Every line below is commented: t
 #     - mouse on
 #     - history-limit 50000
 
-# gates:                  # built-in enforcement gates (Claude Code PreToolUse hooks)
+# gates:                  # built-in enforcement gates (each agent CLI's pre-tool hook)
 #   push: ask             # ask | off — confirm before git push / gh pr create
 #   read_only: ask        # ask | off — in read-only modes, confirm edits to the repo
 #   write_paths: ask      # ask | off — in path-scoped modes, confirm edits outside their write paths
@@ -247,13 +269,18 @@ const globalTemplate = `# kovan's own settings. Every line below is commented: t
 #   terminal: ""          # board key t — empty opens a new iTerm2 tab on macOS
 
 # monitor:                # the cockpit's per-agent summaries (board strip + S page)
-#   model: opus           # model the claude -p summarizer uses (opus/sonnet/haiku)
+#   model: opus           # model the claude summarizer uses (opus/sonnet/haiku)
+#   models:               # per agent CLI; wins over model
+#     codex: gpt-5.5
 
-# accounts:               # Claude accounts an agent can run under
+# accounts:               # accounts an agent can run under
 #   personal:
 #     token_file: ~/.kovan/tokens/personal   # claude setup-token, then chmod 600
 #     env:                                   # extra env for this account's agents
 #       ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5[1m]
+#   openai:
+#     agent: codex                           # a Codex account: its own CODEX_HOME,
+#     home: ~/.kovan/codex/openai            # logged in once with CODEX_HOME=... codex login
 # default_account: personal
 
 # default_mode: code      # task mode when neither the repo nor the command sets one
@@ -276,7 +303,8 @@ const repoTemplate = `# This repository's kovan settings. Every line is commente
 #   dir: works                          # task-doc folder under ~/.kovan/projects/<repo>/; default: works
 #   token: TASK-XXXXX                     # optional: template token substituted with the id
 
-# account: company                      # default Claude account for agents in this repo
+# account: company                      # default account for agents in this repo
+# agent: claude                         # default agent CLI (claude/codex) for this repo
 # domain: code                          # method domain layer (code/writing/…) to compose
 # mode: code                            # default task mode (code/review/analyze/write) for this repo
 # color: cyan                           # default board stripe color for this repo's agents

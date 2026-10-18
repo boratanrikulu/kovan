@@ -24,7 +24,7 @@ func TestWakeLaunchExpiredTranscript(t *testing.T) {
 	if mode != launchFresh {
 		t.Error("expired transcript should start fresh, got resume")
 	}
-	if !strings.Contains(prompt, "previous conversation is gone") {
+	if !strings.Contains(prompt, "starts with no history") {
 		t.Errorf("prompt should say the history is gone, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "wait for my go") {
@@ -47,5 +47,29 @@ func TestWakeLaunchExpiredTranscript(t *testing.T) {
 	// An agent with no session id at all keeps the old --continue behaviour.
 	if mode, _ := wakeLaunch(&session.Manifest{ID: "SC-2", Worktree: home}); mode != launchResume {
 		t.Error("no session id should resume (--continue), got fresh")
+	}
+}
+
+// TestWakeCodexWithoutTranscript: codex picks its own id, so a fresh launch
+// must drop the old one (or the new one is never learned), and a tab with no
+// id starts fresh rather than `resume --last`, which takes the newest
+// conversation in the cwd: a sibling's, or the user's own.
+func TestWakeCodexWithoutTranscript(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	for _, sid := range []string{"", "gone-1"} {
+		m := &session.Manifest{ID: "C", Agent: "codex", Worktree: t.TempDir(), SessionID: sid}
+		if mode, prompt := wakeLaunch(m); mode != launchFresh || prompt == "" {
+			t.Errorf("id %q: wake = %v %q, want a fresh recovery launch", sid, mode, prompt)
+		}
+		freshSession(m, mustDriver(m.Agent))
+		if m.SessionID != "" {
+			t.Errorf("id %q: fresh codex launch kept id %q", sid, m.SessionID)
+		}
+	}
+	claude := &session.Manifest{ID: "K", SessionID: "old"}
+	freshSession(claude, mustDriver(""))
+	if claude.SessionID == "" || claude.SessionID == "old" {
+		t.Errorf("fresh claude launch id = %q, want a new one", claude.SessionID)
 	}
 }

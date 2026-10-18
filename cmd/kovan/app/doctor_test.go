@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 )
 
@@ -29,7 +30,66 @@ func doctorHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("KOVAN_HOME", home)
 	t.Chdir(t.TempDir())
+	agentReady(t)
 	return home
+}
+
+// agentReady gives the test a machine where the agent checks pass: a HOME of
+// its own with kovan's claude hooks installed, and a claude on PATH.
+func agentReady(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// git is linked in rather than its dir added: that dir can hold a real
+	// codex, which would add its hooks file to the checks.
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(git, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", strings.Join([]string{bin, "/usr/bin", "/bin"}, string(os.PathListSeparator)))
+	d := mustDriver(agent.Claude)
+	if _, err := installHooks(d.HooksFile(d.DefaultHome()), d); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDoctorAgentFindings(t *testing.T) {
+	home := doctorHome(t)
+	g := &config.Global{Agent: "claude"}
+	if got := agentFindings(g); len(got) != 0 {
+		t.Errorf("a ready machine has findings: %v", got)
+	}
+
+	// Hooks gone: the board would show no live state and no gate would fire.
+	d := mustDriver(agent.Claude)
+	if err := os.Remove(d.HooksFile(d.DefaultHome())); err != nil {
+		t.Fatal(err)
+	}
+	if got := agentFindings(g); len(got) != 1 || !strings.Contains(got[0].Note, "kovan setup") {
+		t.Errorf("missing hooks = %v, want one finding pointing at kovan setup", got)
+	}
+	agentReady(t)
+
+	for _, bad := range []*config.Global{
+		{Agent: "cdex"},
+		{Agent: "claude", Agents: map[string]config.Agent{"cdex": {}}},
+		{Agent: "claude", Monitor: config.Monitor{Models: map[string]string{"cdex": "x"}}},
+	} {
+		if got := agentFindings(bad); len(got) != 1 || !strings.Contains(got[0].Note, "unknown agent") {
+			t.Errorf("%+v: findings = %v, want one unknown-agent finding", bad, got)
+		}
+	}
+	// A configured binary that is not there.
+	missing := &config.Global{Agent: "claude", Agents: map[string]config.Agent{"claude": {Command: filepath.Join(home, "nope", "claude")}}}
+	if got := agentFindings(missing); len(got) != 1 || !strings.Contains(got[0].Note, "not on PATH") {
+		t.Errorf("missing binary = %v, want a not-on-PATH finding", got)
+	}
 }
 
 func TestDoctorReportsDriftAndExitsDirty(t *testing.T) {

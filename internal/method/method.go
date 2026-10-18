@@ -1,7 +1,7 @@
 // Package method resolves Bora's layered method — the per-agent context kovan
 // composes from ~/.kovan: the global layer, the account and domain layers, and
-// each repo's private layer. It only locates files; composition (the @import
-// wiring) lives in the app.
+// each repo's private layer. It only locates files; composing them into an
+// agent's method at launch lives in the app.
 package method
 
 import (
@@ -46,7 +46,7 @@ type File struct {
 }
 
 // Layer is one method layer's resolved contents: method files (with @imports
-// expanded, delivered via @import) and skills (each a SKILL.md, delivered by
+// expanded, composed into the agent's method) and skills (each a SKILL.md, delivered by
 // symlink). They are separate because they reach Claude by different mechanisms.
 type Layer struct {
 	Name   string
@@ -75,8 +75,7 @@ func Files(dir string) []string { return mdFiles(dir) }
 
 // Worktree returns the per-worktree layers an agent composes — account, domain,
 // project-private — in order, each with its @imports expanded, skipping any
-// layer that contributes no files. The CLAUDE.local.md writer takes only the
-// Depth-0 files (Claude Code expands the imports itself).
+// layer that contributes no files.
 func Worktree(home, account, domain, repo string) []Layer {
 	var layers []Layer
 	add := func(name, dir string) {

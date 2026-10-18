@@ -20,8 +20,8 @@ func TestEditFormPrefill(t *testing.T) {
 	if e.selectedColor() != "blue" {
 		t.Errorf("color prefill = %q, want blue", e.selectedColor())
 	}
-	if e.total() != 3 { // title + mode + color; no accounts → no account field
-		t.Errorf("total = %d, want 3", e.total())
+	if e.total() != 4 { // title + mode + agent + color; no accounts → no account field
+		t.Errorf("total = %d, want 4", e.total())
 	}
 	if !e.onTitle() {
 		t.Error("focus should start on the title")

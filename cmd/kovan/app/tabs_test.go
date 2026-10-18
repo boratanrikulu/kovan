@@ -23,7 +23,7 @@ func TestTabInExistingWorktree(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("KOVAN_HOME", home)
-	fake := filepath.Join(t.TempDir(), "fake")
+	fake := filepath.Join(t.TempDir(), "claude") // named after its driver
 	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\nsleep 60\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestTabInExistingWorktree(t *testing.T) {
 	t.Chdir(repo)
 
 	// The host: a normal worktree agent.
-	host, err := startAgent("host", "host goal", "", "", "", "", false, "")
+	host, err := startAgent("host", "host goal", startOpts{})
 	if err != nil {
 		t.Fatalf("startAgent host: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestTabInExistingWorktree(t *testing.T) {
 	before, _ := os.ReadDir(parent)
 
 	// The guest tab joins the host's worktree.
-	tab, err := startAgent("tab1", "companion", "", "", "", "", false, "host")
+	tab, err := startAgent("tab1", "companion", startOpts{In: "host"})
 	if err != nil {
 		t.Fatalf("startAgent tab: %v", err)
 	}
@@ -91,10 +91,10 @@ func TestTabFlagConflicts(t *testing.T) {
 	t.Setenv("KOVAN_HOME", t.TempDir())
 	repo := gitRepo(t)
 
-	if _, err := scaffoldAgent(repo, "x", "t", "", "", "", "", true, "host", briefInput{}); err == nil {
+	if _, err := scaffoldAgent(repo, "x", "t", startOpts{InPlace: true, In: "host"}); err == nil {
 		t.Error("--in with --in-place should be refused")
 	}
-	if _, err := scaffoldAgent(repo, "x", "t", "somebranch", "", "", "", false, "host", briefInput{}); err == nil {
+	if _, err := scaffoldAgent(repo, "x", "t", startOpts{From: "somebranch", In: "host"}); err == nil {
 		t.Error("--in with --from should be refused")
 	}
 }

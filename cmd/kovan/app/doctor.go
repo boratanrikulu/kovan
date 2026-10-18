@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/mode"
 	"github.com/boratanrikulu/kovan/internal/taskdoc"
@@ -230,7 +232,7 @@ func globalValueFindings(g *config.Global, home string) []config.Finding {
 		switch p.Action {
 		case "", "ask", "deny", "off":
 		default:
-			add(fmt.Sprintf("gates.patterns[%d].action: %q", i, p.Action), `not "ask", "deny" or "off"; sent verbatim to Claude, which rejects it`)
+			add(fmt.Sprintf("gates.patterns[%d].action: %q", i, p.Action), `not "ask", "deny" or "off"; sent verbatim to the agent CLI, which rejects it`)
 		}
 	}
 	if g.DefaultMode != "" {
@@ -248,12 +250,114 @@ func globalValueFindings(g *config.Global, home string) []config.Finding {
 			add(fmt.Sprintf("default_account: %q", g.DefaultAccount), "not configured under accounts")
 		}
 	}
-	for name := range g.Accounts {
+	for name, acct := range g.Accounts {
+		if _, err := agent.For(acctAgent(acct)); err != nil {
+			add(fmt.Sprintf("accounts.%s.agent: %q", name, acct.Agent), err.Error())
+			continue
+		}
 		if _, err := accountTokenFile(g, name); err != nil {
-			add("accounts."+name+".token_file", err.Error())
+			key := "token_file"
+			if acctAgent(acct) != agent.Claude {
+				key = "home"
+			}
+			add("accounts."+name+"."+key, err.Error())
+		}
+	}
+	return append(out, agentFindings(g)...)
+}
+
+// agentFindings flags agent CLI settings the code would refuse at start: an
+// unknown name, a binary that is not installed, and hooks `kovan setup` has
+// not installed (without them the board shows no live state and no gate
+// fires).
+func agentFindings(g *config.Global) []config.Finding {
+	var out []config.Finding
+	add := func(path, note string) { out = append(out, config.Finding{Path: path, Note: note}) }
+	if _, err := agent.For(g.Agent); err != nil {
+		add(fmt.Sprintf("agent: %q", g.Agent), err.Error())
+	} else if !installed(g, g.Agent) {
+		add(fmt.Sprintf("agent: %q", g.Agent), fmt.Sprintf("%s is not on PATH; agents will not start", agentBin(g, g.Agent)))
+	}
+	for name := range g.Agents {
+		if _, err := agent.For(name); err != nil {
+			add("agents."+name, err.Error())
+		}
+	}
+	for name := range g.Monitor.Models {
+		if _, err := agent.For(name); err != nil {
+			add("monitor.models."+name, err.Error())
+		}
+	}
+	for _, t := range hookTargets(g) {
+		if !hooksInstalled(t.path, t.d) {
+			add(t.path, fmt.Sprintf("kovan's %s hooks are missing or stale; run `kovan setup`", t.d.Name()))
 		}
 	}
 	return out
+}
+
+// hooksPresent reports whether path holds a kovan hook for every event d needs,
+// whatever binary it points at.
+func hooksPresent(path string, d agent.Driver) bool {
+	hooks, ok := hooksFileOf(path)
+	if !ok {
+		return false
+	}
+	for _, ev := range d.HookEvents() {
+		groups, _ := hooks[ev].([]any)
+		if !hasGateRun(groups) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasGateRun(groups []any) bool {
+	for _, g := range groups {
+		gm, _ := g.(map[string]any)
+		hs, _ := gm["hooks"].([]any)
+		for _, h := range hs {
+			hm, _ := h.(map[string]any)
+			if cmd, _ := hm["command"].(string); isGateRun(cmd) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hooksFileOf reads the hooks object of a CLI's hooks file.
+func hooksFileOf(path string) (map[string]any, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	root := map[string]any{}
+	if json.Unmarshal(data, &root) != nil {
+		return nil, false
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	return hooks, true
+}
+
+// hooksInstalled reports whether path already holds kovan's current hook for
+// every event d needs.
+func hooksInstalled(path string, d agent.Driver) bool {
+	command, err := gateRunCommand(d)
+	if err != nil {
+		return false
+	}
+	hooks, ok := hooksFileOf(path)
+	if !ok {
+		return false
+	}
+	for _, ev := range d.HookEvents() {
+		groups, _ := hooks[ev].([]any)
+		if _, changed := ensureGateRun(groups, command); changed {
+			return false
+		}
+	}
+	return true
 }
 
 func repoValueFindings(r *config.Repo, global *config.Global, home string) []config.Finding {
@@ -262,6 +366,11 @@ func repoValueFindings(r *config.Repo, global *config.Global, home string) []con
 	if r.Worktree.IDPattern != "" {
 		if _, err := regexp.Compile(r.Worktree.IDPattern); err != nil {
 			add(fmt.Sprintf("worktree.id_pattern: %q", r.Worktree.IDPattern), "invalid regexp; kovan start will refuse every typed id")
+		}
+	}
+	if r.Agent != "" {
+		if _, err := agent.For(r.Agent); err != nil {
+			add(fmt.Sprintf("agent: %q", r.Agent), err.Error())
 		}
 	}
 	if r.Mode != "" {

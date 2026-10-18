@@ -36,8 +36,8 @@ type Mode struct {
 // MethodFile returns the on-disk path of the mode's working-method file
 // (~/.kovan/modes/<name>/method.md), or "" when the mode ships no method. A
 // built-in's embedded method.md is materialized to that path on first use
-// (no-clobber), so it becomes a live, editable file that every agent @imports —
-// edits to it propagate to existing agents on their next session, like every
+// (no-clobber), so it becomes a live, editable file composed into every agent
+// on that mode at launch; edits to it reach existing agents on their next wake, like every
 // other method layer. An empty home, or a mode with no method anywhere, yields "".
 func MethodFile(home, name string) (string, error) {
 	if home == "" || name == "" {

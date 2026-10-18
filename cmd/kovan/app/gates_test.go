@@ -1,10 +1,9 @@
 package app
 
 import (
-	"bytes"
-	"encoding/json"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 )
 
@@ -43,7 +42,7 @@ func TestPushMatrix(t *testing.T) {
 		"curl -X POST https://api.github.com/repos/o/r/merges",
 	}
 	for _, cmd := range matcherAsks {
-		got := evalGates(gateInput{toolName: "Bash", command: cmd, branch: "feat/x"}, allGates())
+		got := evalGates(gateInput{kind: agent.ToolShell, command: cmd, branch: "feat/x"}, allGates())
 		if got.reason != pushReason {
 			t.Errorf("matcher should ask on %q: reason = %q, want %q", cmd, got.reason, pushReason)
 		}
@@ -52,7 +51,7 @@ func TestPushMatrix(t *testing.T) {
 	// Matcher-blind by design: no command to recognize (alias / $VAR).
 	blind := []string{"git pp", "g push", "$GIT push"}
 	for _, cmd := range blind {
-		got := evalGates(gateInput{toolName: "Bash", command: cmd, branch: "feat/x"}, allGates())
+		got := evalGates(gateInput{kind: agent.ToolShell, command: cmd, branch: "feat/x"}, allGates())
 		if got.reason != "" {
 			t.Errorf("matcher should be blind to %q (documented gap): reason = %q", cmd, got.reason)
 		}
@@ -61,7 +60,7 @@ func TestPushMatrix(t *testing.T) {
 	// Innocent commands that must not trip the push gate.
 	clean := []string{"git pull", "echo git push", "gh pr view", `git commit -m "fix push"`}
 	for _, cmd := range clean {
-		got := evalGates(gateInput{toolName: "Bash", command: cmd, branch: "feat/x"}, allGates())
+		got := evalGates(gateInput{kind: agent.ToolShell, command: cmd, branch: "feat/x"}, allGates())
 		if got.reason != "" {
 			t.Errorf("matcher should pass %q: reason = %q", cmd, got.reason)
 		}
@@ -113,31 +112,31 @@ func TestEvalGates(t *testing.T) {
 		gates config.Gates
 		want  string
 	}{
-		{"push", gateInput{toolName: "Bash", command: "git push origin main", branch: "feat/x"}, on, pushReason},
-		{"pr create", gateInput{toolName: "Bash", command: "gh pr create", branch: "feat/x"}, on, pushReason},
-		{"commit on feature branch", gateInput{toolName: "Bash", command: "git commit -m x", branch: "feat/x"}, on, ""},
-		{"commit on protected branch", gateInput{toolName: "Bash", command: "git commit -m x", branch: "main"}, on, defaultBranchReason},
-		{"plain bash", gateInput{toolName: "Bash", command: "echo hi"}, on, ""},
-		{"edit-mode edit untouched", gateInput{toolName: "Edit", filePath: wt + "/main.go", worktree: wt}, on, ""},
+		{"push", gateInput{kind: agent.ToolShell, command: "git push origin main", branch: "feat/x"}, on, pushReason},
+		{"pr create", gateInput{kind: agent.ToolShell, command: "gh pr create", branch: "feat/x"}, on, pushReason},
+		{"commit on feature branch", gateInput{kind: agent.ToolShell, command: "git commit -m x", branch: "feat/x"}, on, ""},
+		{"commit on protected branch", gateInput{kind: agent.ToolShell, command: "git commit -m x", branch: "main"}, on, defaultBranchReason},
+		{"plain bash", gateInput{kind: agent.ToolShell, command: "echo hi"}, on, ""},
+		{"edit-mode edit untouched", gateInput{kind: agent.ToolEdit, filePath: wt + "/main.go", worktree: wt}, on, ""},
 
 		// Read-only posture.
-		{"read-only edit in repo", gateInput{toolName: "Edit", filePath: wt + "/main.go", readOnly: true, worktree: wt}, on, ro},
-		{"read-only write to task store", gateInput{toolName: "Write", filePath: "/home/.kovan/projects/agent/works/TASK-1/review.md", readOnly: true, worktree: wt}, on, ""},
-		{"read-only read is fine", gateInput{toolName: "Read", filePath: wt + "/main.go", readOnly: true, worktree: wt}, on, ""},
-		{"read-only bash untouched", gateInput{toolName: "Bash", command: "git diff", readOnly: true, worktree: wt}, on, ""},
+		{"read-only edit in repo", gateInput{kind: agent.ToolEdit, filePath: wt + "/main.go", readOnly: true, worktree: wt}, on, ro},
+		{"read-only write to task store", gateInput{kind: agent.ToolEdit, filePath: "/home/.kovan/projects/agent/works/TASK-1/review.md", readOnly: true, worktree: wt}, on, ""},
+		{"read-only read is fine", gateInput{kind: agent.ToolOther, filePath: wt + "/main.go", readOnly: true, worktree: wt}, on, ""},
+		{"read-only bash untouched", gateInput{kind: agent.ToolShell, command: "git diff", readOnly: true, worktree: wt}, on, ""},
 
 		// Path-scoped posture (write_paths).
-		{"scoped write inside allowed path", gateInput{toolName: "Write", filePath: wt + "/allowed/log.md", writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
-		{"scoped write to allowed file itself", gateInput{toolName: "Edit", filePath: wt + "/allowed/log.md", writePaths: []string{"allowed/log.md"}, worktree: wt}, on, ""},
-		{"scoped write outside allowed path", gateInput{toolName: "Edit", filePath: wt + "/private/notes.md", writePaths: []string{"allowed/"}, worktree: wt}, on, writePathsReason},
-		{"scoped write escaping via ..", gateInput{toolName: "Edit", filePath: wt + "/allowed/../secret.md", writePaths: []string{"allowed/"}, worktree: wt}, on, writePathsReason},
-		{"scoped write to task store", gateInput{toolName: "Write", filePath: "/home/.kovan/projects/agent/works/TASK-1/report.md", writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
-		{"scoped read is fine", gateInput{toolName: "Read", filePath: wt + "/main.go", writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
-		{"read-only with carve-out, inside", gateInput{toolName: "Write", filePath: wt + "/allowed/log.md", readOnly: true, writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
-		{"read-only with carve-out, outside", gateInput{toolName: "Write", filePath: wt + "/main.go", readOnly: true, writePaths: []string{"allowed/"}, worktree: wt}, on, ro},
-		{"write-paths gate disabled", gateInput{toolName: "Edit", filePath: wt + "/main.go", writePaths: []string{"kovan/"}, worktree: wt}, config.Gates{WritePaths: "off"}, ""},
+		{"scoped write inside allowed path", gateInput{kind: agent.ToolEdit, filePath: wt + "/allowed/log.md", writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
+		{"scoped write to allowed file itself", gateInput{kind: agent.ToolEdit, filePath: wt + "/allowed/log.md", writePaths: []string{"allowed/log.md"}, worktree: wt}, on, ""},
+		{"scoped write outside allowed path", gateInput{kind: agent.ToolEdit, filePath: wt + "/private/notes.md", writePaths: []string{"allowed/"}, worktree: wt}, on, writePathsReason},
+		{"scoped write escaping via ..", gateInput{kind: agent.ToolEdit, filePath: wt + "/allowed/../secret.md", writePaths: []string{"allowed/"}, worktree: wt}, on, writePathsReason},
+		{"scoped write to task store", gateInput{kind: agent.ToolEdit, filePath: "/home/.kovan/projects/agent/works/TASK-1/report.md", writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
+		{"scoped read is fine", gateInput{kind: agent.ToolOther, filePath: wt + "/main.go", writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
+		{"read-only with carve-out, inside", gateInput{kind: agent.ToolEdit, filePath: wt + "/allowed/log.md", readOnly: true, writePaths: []string{"allowed/"}, worktree: wt}, on, ""},
+		{"read-only with carve-out, outside", gateInput{kind: agent.ToolEdit, filePath: wt + "/main.go", readOnly: true, writePaths: []string{"allowed/"}, worktree: wt}, on, ro},
+		{"write-paths gate disabled", gateInput{kind: agent.ToolEdit, filePath: wt + "/main.go", writePaths: []string{"kovan/"}, worktree: wt}, config.Gates{WritePaths: "off"}, ""},
 
-		{"push disabled", gateInput{toolName: "Bash", command: "git push", branch: "feat/x"}, config.Gates{Push: "off"}, ""},
+		{"push disabled", gateInput{kind: agent.ToolShell, command: "git push", branch: "feat/x"}, config.Gates{Push: "off"}, ""},
 	}
 	for _, c := range cases {
 		got := evalGates(c.in, c.gates)
@@ -152,17 +151,17 @@ func TestUserPatternGate(t *testing.T) {
 		{Match: `terraform\s+apply`, Action: "ask", Reason: "kovan: confirm terraform apply"},
 		{Match: `rm\s+-rf\s+/`, Action: "deny", Reason: "kovan: refusing rm -rf /"},
 	}}
-	ask := evalGates(gateInput{toolName: "Bash", command: "terraform apply -auto-approve"}, g)
+	ask := evalGates(gateInput{kind: agent.ToolShell, command: "terraform apply -auto-approve"}, g)
 	if ask.reason == "" || ask.action != "ask" {
 		t.Errorf("terraform pattern: %+v", ask)
 	}
-	deny := evalGates(gateInput{toolName: "Bash", command: "rm -rf /"}, g)
+	deny := evalGates(gateInput{kind: agent.ToolShell, command: "rm -rf /"}, g)
 	if deny.action != "deny" {
 		t.Errorf("rm pattern: action = %q, want deny", deny.action)
 	}
 	// A bad regexp must be skipped, not fatal.
 	bad := config.Gates{Patterns: []config.Pattern{{Match: `([`, Action: "ask", Reason: "x"}}}
-	if got := evalGates(gateInput{toolName: "Bash", command: "echo hi"}, bad); got.reason != "" {
+	if got := evalGates(gateInput{kind: agent.ToolShell, command: "echo hi"}, bad); got.reason != "" {
 		t.Errorf("bad regexp should be skipped: %+v", got)
 	}
 }
@@ -186,23 +185,5 @@ func TestWithinWorktree(t *testing.T) {
 		if got := withinWorktree(c.target, wt); got != c.want {
 			t.Errorf("withinWorktree(%q) = %v, want %v", c.target, got, c.want)
 		}
-	}
-}
-
-func TestWriteDecision(t *testing.T) {
-	var buf bytes.Buffer
-	if err := writeDecision(&buf, "ask", pushReason); err != nil {
-		t.Fatal(err)
-	}
-	var d hookDecision
-	if err := json.Unmarshal(buf.Bytes(), &d); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	out := d.HookSpecificOutput
-	if out.HookEventName != "PreToolUse" || out.PermissionDecision != "ask" {
-		t.Errorf("decision = %+v", out)
-	}
-	if out.PermissionDecisionReason != pushReason {
-		t.Errorf("reason = %q", out.PermissionDecisionReason)
 	}
 }

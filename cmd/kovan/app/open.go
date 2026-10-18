@@ -56,8 +56,11 @@ func openTarget(id string, run runner.Runner) (name string, woke bool, err error
 	// Opening an archived agent restores it: clear the flag so it returns to the
 	// board, then take the normal wake path (its worktree was kept).
 	if readErr == nil && m.Archived {
-		m.Archived = false
-		_ = m.Write()
+		_ = session.Update(name, func(fresh *session.Manifest) error {
+			fresh.Archived = false
+			*m = *fresh
+			return nil
+		})
 	}
 
 	switch decideOpen(alive, readErr == nil) {
@@ -65,6 +68,15 @@ func openTarget(id string, run runner.Runner) (name string, woke bool, err error
 		return "", false, fmt.Errorf("worktree missing; run `kovan remove %s`", id)
 	case actionWake:
 		mode, prompt := wakeLaunch(m)
+		if mode == launchFresh {
+			if err := session.Update(name, func(fresh *session.Manifest) error {
+				freshSession(fresh, mustDriver(fresh.Agent))
+				*m = *fresh
+				return nil
+			}); err != nil {
+				return "", false, err
+			}
+		}
 		sess, err := runnerSession(m, mode, prompt)
 		if err != nil {
 			return "", false, err
@@ -82,8 +94,16 @@ func openTarget(id string, run runner.Runner) (name string, woke bool, err error
 // window while kovan's worktree, branch, and task docs live on — so an agent
 // older than that window would otherwise be unwakeable. When the conversation
 // is gone, it starts fresh and rebuilds from the notes instead.
+//
+// A claude agent with no id at all (one older than kovan's preset ids) resumes
+// with --continue. A CLI that picks its own id and never reported one has no
+// conversation kovan can name, and its "resume the latest" would take a
+// sibling's, so it starts fresh.
 func wakeLaunch(m *session.Manifest) (launchMode, string) {
-	if m.SessionID == "" || transcriptExists(m.SessionID) {
+	if m.SessionID == "" && mustDriver(m.Agent).PresetID() {
+		return launchResume, ""
+	}
+	if m.SessionID != "" && manifestConvo(m).exists() {
 		return launchResume, ""
 	}
 	notes, err := taskDocsFor(m)
@@ -97,8 +117,8 @@ func wakeLaunch(m *session.Manifest) (launchMode, string) {
 // and the notes outlive the transcript, so the agent re-derives where the task
 // stands from them, and reports before it touches anything.
 func recoveryPrompt(notes string) string {
-	p := "Your previous conversation is gone: the agent tool expired the transcript, so this session starts with no history. " +
-		"The work itself is intact — this worktree holds the code and its branch holds the commits."
+	p := "Your previous conversation can't be resumed, so this session starts with no history. " +
+		"The work itself is intact: this worktree holds the code and its branch holds the commits."
 	if notes != "" {
 		p += " Your notes are in " + notes + ": read context.md first, its Status says where things stood, then the rest of the docs there."
 	}

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/git"
 	"github.com/boratanrikulu/kovan/internal/method"
@@ -31,9 +33,9 @@ func linkSkill(src, dst string) bool {
 	return true
 }
 
-// linkGlobalSkills symlinks every global-layer skill into claudeSkillsDir
-// (~/.claude/skills), so they apply to every Claude session — kovan or not, as
-// intended. Best-effort and no-clobber; an absent global/skills dir is a no-op.
+// linkGlobalSkills symlinks every global-layer skill into claudeSkillsDir (a
+// CLI's global skills dir, ~/.claude/skills for Claude Code), so they apply to
+// every session of that CLI, kovan or not, as intended. Best-effort and no-clobber; an absent global/skills dir is a no-op.
 // It returns the names it newly linked.
 func linkGlobalSkills(home, claudeSkillsDir string) ([]string, error) {
 	srcs := method.GlobalSkills(home)
@@ -53,11 +55,25 @@ func linkGlobalSkills(home, claudeSkillsDir string) ([]string, error) {
 	return linked, nil
 }
 
+// worktreeSkillDirs are the worktree-relative dirs the agent CLIs scan for
+// skills. A tab can move to another CLI, so its worktree carries every one.
+func worktreeSkillDirs() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range agent.Names() {
+		if d := mustDriver(n).SkillsDir(); !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // linkWorktreeSkills symlinks an agent's scoped skills (account + domain +
-// project) into its worktree's .claude/skills, keeping each link untracked via
-// the worktree's git exclude rather than the committed .gitignore. No-clobber: a
-// name already present (e.g. a committed repo skill) is left alone. It returns
-// the names it newly linked.
+// project) into each CLI's skills dir in its worktree, keeping each link
+// untracked via the worktree's git exclude rather than the committed
+// .gitignore. No-clobber: a name already present (e.g. a committed repo skill)
+// is left alone. It returns the names it newly linked.
 func linkWorktreeSkills(repo *git.Repo, worktree, account, domain, repoName string) ([]string, error) {
 	home, err := config.Dir()
 	if err != nil {
@@ -67,51 +83,58 @@ func linkWorktreeSkills(repo *git.Repo, worktree, account, domain, repoName stri
 	if len(srcs) == 0 {
 		return nil, nil
 	}
-	skillsDir := filepath.Join(worktree, ".claude", "skills")
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create %s: %w", skillsDir, err)
-	}
 	var linked []string
-	for _, src := range srcs {
-		name := filepath.Base(src)
-		if !linkSkill(src, filepath.Join(skillsDir, name)) {
-			continue
+	for _, rel := range worktreeSkillDirs() {
+		skillsDir := filepath.Join(worktree, rel)
+		if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create %s: %w", skillsDir, err)
 		}
-		linked = append(linked, name)
-		// Keep our symlink out of git without touching the committed .gitignore.
-		if err := repo.AddExclude(filepath.Join(".claude", "skills", name)); err != nil {
-			fmt.Fprintf(os.Stderr, "kovan: exclude skill %s: %v\n", name, err)
+		for _, src := range srcs {
+			name := filepath.Base(src)
+			if !linkSkill(src, filepath.Join(skillsDir, name)) {
+				continue
+			}
+			if !slices.Contains(linked, name) {
+				linked = append(linked, name)
+			}
+			// Keep our symlink out of git without touching the committed .gitignore.
+			if err := repo.AddExclude(filepath.Join(rel, name)); err != nil {
+				fmt.Fprintf(os.Stderr, "kovan: exclude skill %s: %v\n", name, err)
+			}
 		}
 	}
 	return linked, nil
 }
 
 // unlinkWorktreeSkills removes the scoped-skill symlinks linkWorktreeSkills made
-// in a worktree's .claude/skills, recomputed from the same layers. It removes
-// only a symlink that still points at the kovan skill source — never a real
-// directory or a foreign link — so a name the user took over is left intact. It
-// returns the names it removed.
+// in a worktree, recomputed from the same layers. It removes only a symlink
+// that still points at the kovan skill source, never a real directory or a
+// foreign link, so a name the user took over is left intact. It returns the
+// names it removed.
 func unlinkWorktreeSkills(worktree, account, domain, repoName string) ([]string, error) {
 	home, err := config.Dir()
 	if err != nil {
 		return nil, err
 	}
-	skillsDir := filepath.Join(worktree, ".claude", "skills")
 	var removed []string
-	for _, src := range method.WorktreeSkills(home, account, domain, repoName) {
-		dst := filepath.Join(skillsDir, filepath.Base(src))
-		info, err := os.Lstat(dst)
-		if err != nil || info.Mode()&os.ModeSymlink == 0 {
-			continue // gone, or a real entry we never made
+	for _, rel := range worktreeSkillDirs() {
+		for _, src := range method.WorktreeSkills(home, account, domain, repoName) {
+			dst := filepath.Join(worktree, rel, filepath.Base(src))
+			info, err := os.Lstat(dst)
+			if err != nil || info.Mode()&os.ModeSymlink == 0 {
+				continue // gone, or a real entry we never made
+			}
+			if target, _ := os.Readlink(dst); target != src {
+				continue // a foreign link; not ours to remove
+			}
+			if err := os.Remove(dst); err != nil {
+				fmt.Fprintf(os.Stderr, "kovan: unlink skill %s: %v\n", filepath.Base(dst), err)
+				continue
+			}
+			if !slices.Contains(removed, filepath.Base(dst)) {
+				removed = append(removed, filepath.Base(dst))
+			}
 		}
-		if target, _ := os.Readlink(dst); target != src {
-			continue // a foreign link; not ours to remove
-		}
-		if err := os.Remove(dst); err != nil {
-			fmt.Fprintf(os.Stderr, "kovan: unlink skill %s: %v\n", filepath.Base(dst), err)
-			continue
-		}
-		removed = append(removed, filepath.Base(dst))
 	}
 	return removed, nil
 }

@@ -294,13 +294,15 @@ type handoffReadyMsg struct {
 type handoffDoneMsg struct{ err error }
 
 type startedMsg struct {
-	id  string
-	err error
+	id   string
+	warn string // set when the agent's CLI has no kovan hooks
+	err  error
 }
 
 type editedMsg struct {
-	id  string
-	err error
+	id   string
+	warn string
+	err  error
 }
 
 type removedMsg struct {
@@ -436,6 +438,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeBoard
 		m.setInfo("started " + msg.id)
+		if msg.warn != "" {
+			m.setErrMsg("started " + msg.id + ", but " + msg.warn)
+		}
 		return m, m.refresh()
 	case editedMsg:
 		if msg.err != nil {
@@ -445,6 +450,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeBoard
 		m.setInfo("updated " + msg.id)
+		if msg.warn != "" {
+			m.setErrMsg("updated " + msg.id + ", but " + msg.warn)
+		}
 		return m, m.refresh()
 	case removedMsg:
 		if msg.err != nil {
@@ -730,7 +738,10 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	// Stay on the form while the scaffold runs; startedMsg switches to the board
 	// only on success, so a create error keeps the form and its brief intact.
 	m.setInfo("creating agent…")
-	return m, startBriefedCmd(proj.root, id, title, from, m.form.selectedAccount(), m.form.selectedMode(), m.form.selectedColor(), inPlace, in, brief)
+	return m, startBriefedCmd(proj.root, id, title, startOpts{
+		From: from, Account: m.form.selectedAccount(), Agent: m.form.selectedAgent(), Mode: m.form.selectedMode(),
+		Color: m.form.selectedColor(), InPlace: inPlace, In: in, Brief: brief,
+	})
 }
 
 func (m model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -759,13 +770,16 @@ func (m model) submitEdit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.setInfo("saving…")
-	return m, editAgentCmd(m.edit.tmux, title, m.edit.selectedMode(), m.edit.selectedAccount(), m.edit.selectedColor())
+	if m.edit.switching() {
+		m.setInfo("switching to " + m.edit.selectedAgent() + "… (writing the handoff note)")
+	}
+	return m, editAgentCmd(m.edit.tmux, title, m.edit.selectedMode(), m.edit.selectedAgent(), m.edit.selectedAccount(), m.edit.selectedColor())
 }
 
-func editAgentCmd(tmux, title, modeFlag, account, color string) tea.Cmd {
+func editAgentCmd(tmux, title, modeFlag, agentName, account, color string) tea.Cmd {
 	return func() tea.Msg {
-		id, err := editAgent(tmux, title, modeFlag, account, color)
-		return editedMsg{id: id, err: err}
+		id, warn, err := editAgent(tmux, title, modeFlag, agentName, account, color)
+		return editedMsg{id: id, warn: warn, err: err}
 	}
 }
 
@@ -967,14 +981,14 @@ func (m model) openCmd(id string) tea.Cmd {
 // startBriefedCmd scaffolds the agent with the cockpit-composed brief and
 // launches it in one step off the UI thread — no $EDITOR round-trip, since the
 // brief was written in the form.
-func startBriefedCmd(repoRoot, id, title, from, account, modeFlag, color string, inPlace bool, in string, brief briefInput) tea.Cmd {
+func startBriefedCmd(repoRoot, id, title string, o startOpts) tea.Cmd {
 	return func() tea.Msg {
-		spec, err := scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color, inPlace, in, brief)
+		spec, err := scaffoldAgent(repoRoot, id, title, o)
 		if err != nil {
 			return startedMsg{id: id, err: err}
 		}
-		_, err = launchScaffolded(spec, false)
-		return startedMsg{id: spec.manifest.ID, err: err}
+		res, err := launchScaffolded(spec, false)
+		return startedMsg{id: spec.manifest.ID, warn: res.Warning, err: err}
 	}
 }
 
@@ -1280,6 +1294,7 @@ var boardColumns = []boardColumn{
 	{"MODE", func(r boardRow) string { return orDash(r.Mode) }},
 	{"AGE", func(r boardRow) string { return r.Age }},
 	{"ACCOUNT", func(r boardRow) string { return orDash(r.Account) }},
+	{"AGENT", func(r boardRow) string { return mustDriver(r.Agent).Name() }},
 	{"PERM", func(r boardRow) string { return orDash(r.Perm) }},
 	{"WORKSPACE", workspaceCell},
 	{"TITLE", func(r boardRow) string { return r.Title }},

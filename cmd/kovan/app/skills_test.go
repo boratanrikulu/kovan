@@ -95,9 +95,12 @@ func TestLinkWorktreeSkills(t *testing.T) {
 		t.Errorf("linked = %v, want voice and repo-skill", linked)
 	}
 
-	for name, want := range map[string]string{"voice": acc, "repo-skill": proj} {
-		if target, _ := os.Readlink(filepath.Join(repoRoot, ".claude", "skills", name)); target != want {
-			t.Errorf("%s links to %q, want %q", name, target, want)
+	// Every CLI's skills dir gets them, so a tab that switches CLI keeps them.
+	for _, dir := range []string{".claude", ".agents"} {
+		for name, want := range map[string]string{"voice": acc, "repo-skill": proj} {
+			if target, _ := os.Readlink(filepath.Join(repoRoot, dir, "skills", name)); target != want {
+				t.Errorf("%s/skills/%s links to %q, want %q", dir, name, target, want)
+			}
 		}
 	}
 	if info, _ := os.Lstat(committed); info.Mode()&os.ModeSymlink != 0 {
@@ -108,7 +111,7 @@ func TestLinkWorktreeSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{".claude/skills/voice", ".claude/skills/repo-skill"} {
+	for _, want := range []string{".claude/skills/voice", ".claude/skills/repo-skill", ".agents/skills/voice", ".agents/skills/repo-skill"} {
 		if !strings.Contains(string(exclude), want) {
 			t.Errorf("exclude missing %q:\n%s", want, exclude)
 		}

@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
+	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/git"
-	"github.com/boratanrikulu/kovan/internal/mode"
 	"github.com/boratanrikulu/kovan/internal/session"
 )
 
@@ -144,22 +145,19 @@ func TestRemoveWorkspace(t *testing.T) {
 	}
 }
 
-func TestAddWorkspaceRefreshesClaudeLocal(t *testing.T) {
+func TestAddWorkspaceListedInMethod(t *testing.T) {
 	_, m := siblingRepos(t)
-	code := &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}
-	if err := writeClaudeLocal(m.Worktree, m.ID, m.Title, "/notes", "", "", m.Repo, code, nil); err != nil {
-		t.Fatal(err)
-	}
 	ws, _, err := addWorkspace(m, "cloud", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(m.Worktree, claudeLocalFile))
+	home, _ := config.Dir()
+	text, err := composeMethod(home, m, mustDriver(agent.Claude))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "## Workspaces") || !strings.Contains(string(data), ws.Worktree) {
-		t.Errorf("CLAUDE.local.md does not list the new workspace:\n%s", data)
+	if !strings.Contains(text, "## Workspaces") || !strings.Contains(text, ws.Worktree) {
+		t.Errorf("the method does not list the new workspace:\n%s", text)
 	}
 }
 

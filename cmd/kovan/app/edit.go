@@ -3,9 +3,9 @@ package app
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/mode"
 	"github.com/boratanrikulu/kovan/internal/session"
@@ -14,56 +14,72 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// editAgent updates an existing agent's editable fields — title, task mode,
-// account, and row color — on its manifest, then re-applies their side effects:
-// it re-renders the worktree's CLAUDE.local.md (so the mode's protocol pointer
-// is current) and scaffolds any docs the new mode adds. The opening prompt already fired at
-// launch, so a mode change shapes the standing instructions, not that first
-// turn; the account takes effect on the next wake (the token is injected at
-// launch). Structural fields (id, branch, base, repo) are not editable.
-func editAgent(tmux, title, modeFlag, account, color string) (id string, err error) {
+// editAgent updates an existing agent's editable fields (title, task mode,
+// agent CLI, account, and row color) on its manifest, then re-applies their
+// side effects: it scaffolds any docs the new mode adds, and a new agent CLI
+// switches the tab over now (see switchAgent). The opening prompt already
+// fired at launch, so a mode change shapes the standing instructions (the
+// method composed at the next launch), not that first turn; the account takes
+// effect on the next wake (the token is injected at launch). Structural fields
+// (id, branch, base, repo) are not editable. The warning is a switch's: set
+// when the new CLI has no kovan hooks.
+func editAgent(tmux, title, modeFlag, agentName, account, color string) (id, warning string, err error) {
 	man, err := session.ReadByTmux(tmux)
 	if err != nil {
-		return "", fmt.Errorf("read agent: %w", err)
+		return "", "", fmt.Errorf("read agent: %w", err)
 	}
 	global, err := config.LoadGlobal()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	home, err := config.Dir()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	repoCfg, err := config.LoadRepo(home, man.Repo)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	// Validate the account token before writing anything, so a bad file fails
-	// without half-applying the edit.
-	if _, err := accountTokenFile(global, account); err != nil {
-		return "", err
+	switching := agentName != "" && mustDriver(agentName).Name() != mustDriver(man.Agent).Name()
+	// Validate before writing anything, so a bad token file or a switch that
+	// cannot happen fails without half-applying the edit.
+	if switching {
+		if _, err := checkSwitch(global, agentName, account); err != nil {
+			return "", "", err
+		}
+	} else if _, err := accountTokenFile(global, account); err != nil {
+		return "", "", err
 	}
 	taskMode, err := mode.Load(home, modeFlag)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	man.Title = title
-	man.TaskMode = taskMode.Name
-	man.Account = account
-	man.Color = color
-	if err := man.Write(); err != nil {
-		return "", err
+	if err := session.Update(tmux, func(fresh *session.Manifest) error {
+		fresh.Title, fresh.TaskMode, fresh.Color = title, taskMode.Name, color
+		if !switching {
+			fresh.Account = account
+		}
+		*man = *fresh
+		return nil
+	}); err != nil {
+		return "", "", err
 	}
 
 	taskAbs := taskDocsDir(home, man.Repo, repoCfg.Task.Dir, man.ID)
 	if err := taskdoc.Scaffold(taskAbs, man.ID, title, repoCfg.Task.Token, templatesDir(), taskMode.Docs); err != nil {
-		return "", err
+		return "", "", err
 	}
-	if err := renderClaudeLocal(man); err != nil {
-		return "", err
+	if switching {
+		run, err := newRunner(global.Runner)
+		if err != nil {
+			return "", "", err
+		}
+		if warning, err = switchAgent(man, global, run, agentName, account); err != nil {
+			return "", "", fmt.Errorf("switch to %s: %w", agentName, err)
+		}
 	}
-	return man.ID, nil
+	return man.ID, warning, nil
 }
 
 // editModel is the board's edit modal: the agent's title (free text), task mode,
@@ -75,11 +91,15 @@ type editModel struct {
 	title    textinput.Model
 	modes    []string
 	mode     int
-	accounts []string
+	agents   []string // every known agent CLI
+	agent    int
+	current  string   // the agent CLI the tab runs now
+	accounts []string // the selected agent CLI's accounts
 	account  int
+	origAcct string // the tab's account, preselected while it fits the agent
 	colors   []string
 	color    int
-	focus    int // 0 title, 1 mode, then account (when configured), color last
+	focus    int // 0 title, 1 mode, 2 agent, then account (when the agent has any), color last
 }
 
 // newEditForm builds the edit modal pre-filled from the selected board row.
@@ -99,14 +119,10 @@ func newEditForm(row boardRow) editModel {
 		}
 		e.mode = indexOf(e.modes, row.Mode)
 	}
-	if g, err := config.LoadGlobal(); err == nil && len(g.Accounts) > 0 {
-		for name := range g.Accounts {
-			e.accounts = append(e.accounts, name)
-		}
-		sort.Strings(e.accounts)
-		e.accounts = accountPicks(e.accounts)
-		e.account = indexOf(e.accounts, row.Account)
-	}
+	e.current, e.origAcct = mustDriver(row.Agent).Name(), row.Account
+	e.agents = agent.Names()
+	e.agent = indexOf(e.agents, e.current)
+	e.refilterAccounts()
 	e.colors = append([]string{"none"}, rowTintNames...)
 	if row.Color != "" {
 		e.color = indexOf(e.colors, row.Color)
@@ -114,8 +130,20 @@ func newEditForm(row boardRow) editModel {
 	return e
 }
 
+// refilterAccounts lists the selected agent CLI's accounts, keeping the tab's
+// own account selected when it belongs to that CLI.
+func (e *editModel) refilterAccounts() {
+	e.accounts, e.account = nil, 0
+	g, err := config.LoadGlobal()
+	if err != nil {
+		return
+	}
+	e.accounts = accountsFor(g, e.selectedAgent())
+	e.account = indexOf(e.accounts, e.origAcct)
+}
+
 func (e editModel) total() int {
-	n := 3 // title + mode + color
+	n := 4 // title + mode + agent + color
 	if len(e.accounts) > 0 {
 		n++
 	}
@@ -124,10 +152,21 @@ func (e editModel) total() int {
 
 func (e editModel) onTitle() bool { return e.focus == 0 }
 func (e editModel) onMode() bool  { return e.focus == 1 }
+func (e editModel) onAgent() bool { return e.focus == 2 }
 func (e editModel) onAccount() bool {
-	return len(e.accounts) > 0 && e.focus == 2
+	return len(e.accounts) > 0 && e.focus == 3
 }
-func (e editModel) onColor() bool { return e.focus == e.total()-1 }
+
+func (e editModel) selectedAgent() string {
+	if len(e.agents) == 0 {
+		return e.current
+	}
+	return e.agents[e.agent]
+}
+
+// switching reports whether saving moves the tab to another agent CLI.
+func (e editModel) switching() bool { return e.selectedAgent() != e.current }
+func (e editModel) onColor() bool   { return e.focus == e.total()-1 }
 
 func (e editModel) selectedMode() string {
 	if len(e.modes) == 0 {
@@ -180,6 +219,18 @@ func (e editModel) update(msg tea.Msg) (editModel, tea.Cmd) {
 			}
 			return e, nil
 		}
+		if e.onAgent() && len(e.agents) > 0 {
+			switch key.String() {
+			case "left", "h":
+				e.agent = (e.agent - 1 + len(e.agents)) % len(e.agents)
+			case "right", "l":
+				e.agent = (e.agent + 1) % len(e.agents)
+			default:
+				return e, nil
+			}
+			e.refilterAccounts()
+			return e, nil
+		}
 		if e.onAccount() {
 			switch key.String() {
 			case "left", "h":
@@ -214,12 +265,23 @@ func (e editModel) view(status string) string {
 	}
 	lines := []string{
 		brandHeader(head),
-		dimStyle.Render("change the title, mode, account, or color; account applies on the next wake"),
+		dimStyle.Render("change the title, mode, agent, account, or color; account applies on the next wake"),
 		"",
 		dimStyle.Render("title"), e.title.View(), "",
 	}
 	if len(e.modes) > 0 {
 		lines = append(lines, dimStyle.Render("mode"), cycler(e.modes[e.mode], e.onMode()), "")
+	}
+	if len(e.agents) > 0 {
+		label := e.selectedAgent()
+		if g, err := config.LoadGlobal(); err == nil {
+			label = agentLabel(g, label)
+		}
+		lines = append(lines, dimStyle.Render("agent"), cycler(label, e.onAgent()))
+		if e.switching() {
+			lines = append(lines, dimStyle.Render("  saving restarts it under "+e.selectedAgent()+": the conversation stays with "+e.current+", a handoff note carries it over"))
+		}
+		lines = append(lines, "")
 	}
 	if len(e.accounts) > 0 {
 		lines = append(lines, dimStyle.Render("account"), cycler(e.accounts[e.account], e.onAccount()), "")

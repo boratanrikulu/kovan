@@ -16,13 +16,11 @@ func setArchived(id string, archived bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m, err := session.ReadByTmux(name)
-	if err != nil {
-		return "", fmt.Errorf("read agent: %w", err)
-	}
-	m.Archived = archived
-	if err := m.Write(); err != nil {
-		return "", err
+	if err := session.Update(name, func(m *session.Manifest) error {
+		m.Archived = archived
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("archive agent: %w", err)
 	}
 	if archived {
 		global, err := config.LoadGlobal()

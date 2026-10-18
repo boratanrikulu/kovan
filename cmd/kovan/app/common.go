@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/git"
 	"github.com/boratanrikulu/kovan/internal/mode"
@@ -26,32 +27,6 @@ const (
 	launchResume                   // reconnect the agent to its existing conversation
 )
 
-// agentCommand builds the shell command that launches the agent. Both forms
-// live here so that swapping the agent tool stays a single-site change. addDirs
-// grants the agent access to dirs outside its cwd (the task docs, its other
-// workspaces); a "--" guards the positional prompt from the variadic --add-dir
-// flag.
-func agentCommand(agent, prompt string, mode launchMode, addDirs []string, sessionID string) string {
-	add := ""
-	for _, d := range addDirs {
-		add += " --add-dir " + shellQuote(d)
-	}
-	// Resume targets the tab's own conversation by id: --continue picks the most
-	// recent conversation in the cwd, which is a sibling's when tabs share a
-	// worktree. --resume reuses the id, so it stays valid across wakes.
-	if mode == launchResume {
-		if sessionID != "" {
-			return agent + add + " --resume " + shellQuote(sessionID)
-		}
-		return agent + add + " --continue"
-	}
-	sid := ""
-	if sessionID != "" {
-		sid = " --session-id " + shellQuote(sessionID)
-	}
-	return agent + add + sid + " -- " + shellQuote(prompt)
-}
-
 // runnerSession builds the detached session that launches the agent, applying
 // the user's tmux options and the manifest's account token, and granting access
 // to the agent's durable task-doc dir and its other workspaces. prompt is the
@@ -59,6 +34,10 @@ func agentCommand(agent, prompt string, mode launchMode, addDirs []string, sessi
 // KOVAN_SESSION names the tab, so kovan commands the agent runs resolve it.
 func runnerSession(m *session.Manifest, mode launchMode, prompt string) (runner.Session, error) {
 	global, err := config.LoadGlobal()
+	if err != nil {
+		return runner.Session{}, err
+	}
+	d, err := driverOf(m.Agent)
 	if err != nil {
 		return runner.Session{}, err
 	}
@@ -70,6 +49,11 @@ func runnerSession(m *session.Manifest, mode launchMode, prompt string) (runner.
 	if err != nil {
 		return runner.Session{}, err
 	}
+	stripClaudeLocalBlock(m)
+	methodFile, err := writeMethod(m, d)
+	if err != nil {
+		return runner.Session{}, err
+	}
 	// kovan's branding goes last so it wins over any user status options.
 	opts := append(append([]string{}, global.Tmux.Options...), statusBarOptions(m)...)
 	dirs := []string{notes}
@@ -77,10 +61,17 @@ func runnerSession(m *session.Manifest, mode launchMode, prompt string) (runner.
 		dirs = append(dirs, w.Worktree)
 	}
 	return runner.Session{
-		Name:    m.Tmux,
-		Title:   fmt.Sprintf("%s: %s", m.ID, m.Title), // tmux window + terminal tab
-		Dir:     m.Worktree,
-		Cmd:     launchCommand(m.Agent, prompt, mode, tokenFile, accountEnv(global, m.Account), dirs, m.SessionID),
+		Name:  m.Tmux,
+		Title: fmt.Sprintf("%s: %s", m.ID, m.Title), // tmux window + terminal tab
+		Dir:   m.Worktree,
+		Cmd: authPrefix(global, d, m.Account, tokenFile) + d.Command(agent.Launch{
+			Bin:       agentBin(global, m.Agent),
+			Prompt:    prompt,
+			Dirs:      dirs,
+			SessionID: m.SessionID,
+			Resume:    mode == launchResume,
+			Method:    methodFile,
+		}),
 		Env:     []string{sessionEnv + "=" + m.Tmux},
 		Options: opts,
 	}, nil
@@ -193,9 +184,7 @@ func resolveSession(id string) (name, worktree string, err error) {
 }
 
 // shellQuote single-quotes s for safe interpolation into a shell command line.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
+func shellQuote(s string) string { return agent.Quote(s) }
 
 // project is a repo the new-agent form can target: a display name and its root.
 type project struct {

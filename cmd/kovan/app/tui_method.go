@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/method"
 	"github.com/boratanrikulu/kovan/internal/mode"
@@ -182,19 +183,30 @@ func focused(files []method.File, i int) string {
 	return ""
 }
 
-// aiEditCommand launches the agent on a method file to revise it interactively.
-// "--" before the prompt is mandatory: the agent's --add-dir-style flags are
-// variadic and would otherwise swallow the positional prompt (the init bug). We
-// pass no --add-dir here — the file's own directory is the cwd.
+// aiEditCommand launches the default agent on a method file to revise it
+// interactively, under the default account. No extra dirs: the file's own
+// directory is the cwd.
 func aiEditCommand(path string) *exec.Cmd {
-	agent := "claude"
-	if g, err := config.LoadGlobal(); err == nil && g.Agent != "" {
-		agent = g.Agent
+	global, err := config.LoadGlobal()
+	if err != nil {
+		global = &config.Global{}
 	}
-	cmd := exec.Command(agent, "--",
-		"Open "+filepath.Base(path)+" and help me revise it. "+
-			"Ask what I want to change before editing.")
+	d := mustDriver(global.Agent)
+	account, err := accountFor(global, d, "", "")
+	if err != nil {
+		account = ""
+	}
+	tokenFile, err := accountTokenFile(global, account)
+	if err != nil {
+		account, tokenFile = "", ""
+	}
+	line := d.Command(agent.Launch{
+		Bin:    agentBin(global, global.Agent),
+		Prompt: "Open " + filepath.Base(path) + " and help me revise it. Ask what I want to change before editing.",
+	})
+	cmd := exec.Command("sh", "-c", authPrefix(global, d, account, tokenFile)+"exec "+line)
 	cmd.Dir = filepath.Dir(path)
+	cmd.Env = withoutEnv(os.Environ(), sessionEnv) // this session is no agent's
 	return cmd
 }
 

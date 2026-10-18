@@ -13,7 +13,8 @@ var rootCmd = &cobra.Command{
 	Long: `kovan runs many coding agents in parallel, each in its own git worktree,
 and keeps your AI working method in a single place that governs every project.
 
-It does not replace Claude Code. It sets the stage and the agent does the work.`,
+It does not replace your agent CLI (Claude Code or Codex). It sets the stage
+and the agent does the work.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	Args:          cobra.NoArgs,

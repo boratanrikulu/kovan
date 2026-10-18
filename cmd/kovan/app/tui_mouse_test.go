@@ -58,8 +58,8 @@ func TestHeaderTabAt(t *testing.T) {
 }
 
 // mouseTestForm is a minimal form (two inputs, modes, colors, no accounts) so
-// hit-testing is deterministic: total focusables = 8 (id, title, project,
-// target, from, mode, color, brief).
+// hit-testing is deterministic: total focusables = 9 (id, title, project,
+// target, from, mode, agent, color, brief).
 func mouseTestForm() formModel {
 	f := formModel{
 		inputs: []textinput.Model{textinput.New(), textinput.New()},
@@ -73,14 +73,14 @@ func mouseTestForm() formModel {
 
 func TestFormHitAt(t *testing.T) {
 	f := mouseTestForm()
-	// view() order: header (2) + fields (12: WHAT,id,title,blank,WHERE,project,
-	// where,ctx,blank,HOW,mode,color) + spacer + options (6) + spacer + CONTEXT
-	// header + brief.
+	// view() order: header (2) + fields (13: WHAT,id,title,blank,WHERE,project,
+	// where,ctx,blank,HOW,mode,agent,color) + spacer + options (6) + spacer +
+	// CONTEXT header + brief.
 	fields, targets := f.fieldColumn()
-	if len(fields) != 12 {
-		t.Fatalf("fieldColumn lines = %d, want 12", len(fields))
+	if len(fields) != 13 {
+		t.Fatalf("fieldColumn lines = %d, want 13", len(fields))
 	}
-	wantTargets := []int{-1, 0, 1, -1, -1, 2, 3, 4, -1, -1, 5, 6}
+	wantTargets := []int{-1, 0, 1, -1, -1, 2, 3, 4, -1, -1, 5, 6, 7}
 	for i, w := range wantTargets {
 		if targets[i] != w {
 			t.Errorf("fieldColumn target[%d] = %d, want %d", i, targets[i], w)
@@ -101,14 +101,15 @@ func TestFormHitAt(t *testing.T) {
 		{"where row", 8, hitField, 3},
 		{"ctx row", 9, hitField, 4},
 		{"mode row", 12, hitField, 5},
-		{"color row", 13, hitField, 6},
-		{"spacer above options", 14, hitNone, 0},
-		{"options title", 15, hitNone, 0}, // focus 0 → informational recap
-		{"recap line", 16, hitNone, 0},
-		{"CONTEXT header", 22, hitNone, 0},
-		{"brief first line", 23, hitBrief, 0},
-		{"brief last line", 26, hitBrief, 0},
-		{"below the brief", 27, hitNone, 0},
+		{"agent row", 13, hitField, 6},
+		{"color row", 14, hitField, 7},
+		{"spacer above options", 15, hitNone, 0},
+		{"options title", 16, hitNone, 0}, // focus 0 → informational recap
+		{"recap line", 17, hitNone, 0},
+		{"CONTEXT header", 23, hitNone, 0},
+		{"brief first line", 24, hitBrief, 0},
+		{"brief last line", 27, hitBrief, 0},
+		{"below the brief", 28, hitNone, 0},
 	}
 	for _, c := range cases {
 		kind, idx := f.formHitAt(c.y)
@@ -121,18 +122,18 @@ func TestFormHitAt(t *testing.T) {
 func TestFormHitAtOptions(t *testing.T) {
 	f := mouseTestForm()
 	f.setFocus(5) // mode: a non-searchable picker, options are clickable
-	// Options panel starts after header(2) + fields(12) + spacer(1) = 15:
-	// title at 15, then the option rows.
-	if kind, _ := f.formHitAt(15); kind != hitNone {
+	// Options panel starts after header(2) + fields(13) + spacer(1) = 16:
+	// title at 16, then the option rows.
+	if kind, _ := f.formHitAt(16); kind != hitNone {
 		t.Errorf("options title: kind = %d, want hitNone", kind)
 	}
 	for i, mode := range f.modes {
-		kind, idx := f.formHitAt(16 + i)
+		kind, idx := f.formHitAt(17 + i)
 		if kind != hitOption || idx != i {
-			t.Errorf("option %q: formHitAt(%d) = (%d,%d), want (hitOption,%d)", mode, 16+i, kind, idx, i)
+			t.Errorf("option %q: formHitAt(%d) = (%d,%d), want (hitOption,%d)", mode, 17+i, kind, idx, i)
 		}
 	}
-	if kind, _ := f.formHitAt(16 + len(f.modes)); kind != hitNone {
+	if kind, _ := f.formHitAt(17 + len(f.modes)); kind != hitNone {
 		t.Errorf("blank option row: want hitNone")
 	}
 }
@@ -152,7 +153,14 @@ func TestFormSetOption(t *testing.T) {
 		t.Errorf("mode = %q, want review", f.selectedMode())
 	}
 
-	f.setFocus(6) // color
+	f.agents = []string{"claude", "codex"}
+	f.setFocus(6) // agent
+	f = f.setOption(1)
+	if f.selectedAgent() != "codex" {
+		t.Errorf("agent = %q, want codex", f.selectedAgent())
+	}
+
+	f.setFocus(7) // color
 	f = f.setOption(1)
 	if f.selectedColor() != "red" {
 		t.Errorf("color = %q, want red", f.selectedColor())
@@ -179,7 +187,7 @@ func TestHandleFormMouseClick(t *testing.T) {
 	}
 
 	// Click the brief → focus moves to the last field.
-	next, _ = m.handleFormMouse(tea.MouseMsg{Y: 23, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, _ = m.handleFormMouse(tea.MouseMsg{Y: 24, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	f := next.(model).form
 	if !f.onBrief() {
 		t.Errorf("click brief: focus = %d, want the brief (%d)", f.focus, f.total()-1)
@@ -212,7 +220,7 @@ func TestHandleFormMouseWheelBrief(t *testing.T) {
 
 	// Inline: wheel up over the brief region engages it and scrolls (the cursor
 	// moves 3 lines; focus is needed for the textarea to reposition its view).
-	next, _ := m.handleFormMouse(tea.MouseMsg{Y: 23, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	next, _ := m.handleFormMouse(tea.MouseMsg{Y: 24, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
 	m = next.(model)
 	if got := m.form.brief.Line(); got != 4 {
 		t.Errorf("inline wheel up: line = %d, want 4", got)

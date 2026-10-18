@@ -2,7 +2,7 @@
 // manifest file under ~/.kovan/sessions, one per tab, keyed by the tab's unique
 // tmux session name. Many tabs can share one worktree (a "workspace"), so the
 // manifest is keyed by the tab, not the worktree. The board reads every manifest
-// in the index; gates resolve the acting tab by its Claude session id.
+// in the index; gates resolve the acting tab by its agent CLI's session id.
 package session
 
 import (
@@ -11,14 +11,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/boratanrikulu/kovan/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
-// NewID returns a random UUIDv4, used as the agent's Claude session id so its
-// transcript lands at a known ~/.claude/projects/*/<id>.jsonl path.
+// NewID returns a random UUIDv4, used as the agent's session id when its CLI
+// takes one up front (Claude Code), so its transcript lands at a known path.
 func NewID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -32,30 +33,40 @@ func NewID() (string, error) {
 // Manifest records everything the board and the lifecycle commands need to
 // know about one agent.
 type Manifest struct {
-	ID           string      `yaml:"id"`
-	Title        string      `yaml:"title"`
-	Repo         string      `yaml:"repo"`
-	RepoRoot     string      `yaml:"repo_root"`
-	Worktree     string      `yaml:"worktree"`
-	Branch       string      `yaml:"branch"`
-	Base         string      `yaml:"base"`
-	InPlace      bool        `yaml:"in_place,omitempty"` // the worktree IS the repo checkout: no separate dir, no new branch
-	Tmux         string      `yaml:"tmux"`
-	Agent        string      `yaml:"agent"`
-	Account      string      `yaml:"account,omitempty"`    // kovan's account label, never the token
-	SessionID    string      `yaml:"session_id,omitempty"` // Claude session id; locates the transcript
-	State        string      `yaml:"state"`                // working | needs-you | idle, kept live by the gate hook
-	Archived     bool        `yaml:"archived,omitempty"`   // set aside: tmux killed, worktree kept, hidden from the default board
-	Pinned       bool        `yaml:"pinned,omitempty"`     // kept at the top of the board; pure metadata, no lifecycle effect
-	Color        string      `yaml:"color,omitempty"`      // board row tint, a palette name (red, blue, …); pure tagging
-	Mode         string      `yaml:"mode,omitempty"`       // hook-seen permission mode; the board prefers the transcript's
-	TaskMode     string      `yaml:"task_mode,omitempty"`  // the task's working style: code | review | analyze | write | …; the gates resolve posture and write paths live from it
-	Effort       string      `yaml:"effort,omitempty"`
-	Summary      string      `yaml:"summary,omitempty"`    // last monitor summary; anything scanning the index reads it without a tmux capture
-	SummaryAt    time.Time   `yaml:"summary_at,omitempty"` // when that summary was generated
-	LastActivity time.Time   `yaml:"last_activity,omitempty"`
-	CreatedAt    time.Time   `yaml:"created_at"`
-	Extra        []Workspace `yaml:"extra,omitempty"` // worktrees in other repos this agent also works in
+	ID           string            `yaml:"id"`
+	Title        string            `yaml:"title"`
+	Repo         string            `yaml:"repo"`
+	RepoRoot     string            `yaml:"repo_root"`
+	Worktree     string            `yaml:"worktree"`
+	Branch       string            `yaml:"branch"`
+	Base         string            `yaml:"base"`
+	InPlace      bool              `yaml:"in_place,omitempty"` // the worktree IS the repo checkout: no separate dir, no new branch
+	Quick        bool              `yaml:"quick,omitempty"`    // a throwaway task: launched with its title as the goal, no task protocol
+	Tmux         string            `yaml:"tmux"`
+	Agent        string            `yaml:"agent"`
+	Account      string            `yaml:"account,omitempty"`    // kovan's account label, never the token
+	SessionID    string            `yaml:"session_id,omitempty"` // the agent CLI's session id; locates the transcript
+	Sessions     map[string]string `yaml:"sessions,omitempty"`   // the session id of each other agent CLI this tab ran under, so switching back resumes it
+	State        string            `yaml:"state"`                // working | needs-you | idle, kept live by the gate hook
+	Archived     bool              `yaml:"archived,omitempty"`   // set aside: tmux killed, worktree kept, hidden from the default board
+	Pinned       bool              `yaml:"pinned,omitempty"`     // kept at the top of the board; pure metadata, no lifecycle effect
+	Color        string            `yaml:"color,omitempty"`      // board row tint, a palette name (red, blue, …); pure tagging
+	Mode         string            `yaml:"mode,omitempty"`       // hook-seen permission mode; the board prefers the transcript's
+	TaskMode     string            `yaml:"task_mode,omitempty"`  // the task's working style: code | review | analyze | write | …; the gates resolve posture and write paths live from it
+	Effort       string            `yaml:"effort,omitempty"`
+	Summary      string            `yaml:"summary,omitempty"`    // last monitor summary; anything scanning the index reads it without a tmux capture
+	SummaryAt    time.Time         `yaml:"summary_at,omitempty"` // when that summary was generated
+	LastActivity time.Time         `yaml:"last_activity,omitempty"`
+	CreatedAt    time.Time         `yaml:"created_at"`
+	Extra        []Workspace       `yaml:"extra,omitempty"` // worktrees in other repos this agent also works in
+	Gate         *GatePass         `yaml:"gate,omitempty"`  // the last command a gate denied, for a CLI that cannot ask
+}
+
+// GatePass is a gated command waiting on the user's approval: the command (or
+// the edited files), and whether the user has approved it for this turn.
+type GatePass struct {
+	Key      string `yaml:"key"`
+	Approved bool   `yaml:"approved,omitempty"`
 }
 
 // Workspace is one repo checkout an agent works in. The primary is spelled out in
@@ -215,7 +226,7 @@ func FindWorkspace(dir string) (m *Manifest, w Workspace, found bool, err error)
 	return m, w, m != nil, nil
 }
 
-// FindBySessionID returns the tab with the given Claude session id, used by the
+// FindBySessionID returns the tab with the given agent session id, used by the
 // gate hook to resolve the acting tab even when several share a worktree.
 func FindBySessionID(id string) (m *Manifest, found bool, err error) {
 	if id == "" {
@@ -327,6 +338,52 @@ func writeAtomic(path string, data []byte) error {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	return nil
+}
+
+// Lock takes the session index's write lock and returns its release. Hook
+// processes run concurrently (a CLI fires several around parallel tool calls),
+// and each reads a manifest, decides, and writes it back: without the lock one
+// would write over another's change. Only callers that read, then write,
+// need it.
+//
+// The lock file sits next to the index, not in it: List prunes every entry it
+// can't read as a manifest, and a pruned lock file locks nothing.
+func Lock() (unlock func(), err error) {
+	dir, err := indexDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(filepath.Dir(dir), "sessions.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { f.Close() }, nil
+}
+
+// Update re-reads the tab's manifest under the lock, applies fn and writes it
+// back, so a change another process made since the caller last read it is
+// kept.
+func Update(tmux string, fn func(*Manifest) error) error {
+	unlock, err := Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	m, err := ReadByTmux(tmux)
+	if err != nil {
+		return err
+	}
+	if err := fn(m); err != nil {
+		return err
+	}
+	return m.Write()
 }
 
 func indexDir() (string, error) {

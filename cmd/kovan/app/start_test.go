@@ -84,7 +84,7 @@ func TestScaffoldColorDefaults(t *testing.T) {
 
 	scaffold := func(id, color string) string {
 		t.Helper()
-		spec, err := scaffoldAgent(repo, id, "goal", "", "", "", color, false, "", briefInput{})
+		spec, err := scaffoldAgent(repo, id, "goal", startOpts{Color: color})
 		if err != nil {
 			t.Fatalf("scaffold %s: %v", id, err)
 		}

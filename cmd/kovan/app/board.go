@@ -19,13 +19,14 @@ type boardRow struct {
 	ID        string
 	Repo      string
 	Account   string
+	Agent     string // the agent CLI, as the manifest names it
 	Age       string
 	Branch    string
 	Title     string
 	Tmux      string
 	Worktree  string              // worktree root, for board apps (editor/git GUI); not rendered
 	Cont      bool                // a sibling tab sharing the row above's worktree (a workspace continuation)
-	SessionID string              // Claude session id; locates the transcript the summarizer digests
+	SessionID string              // the agent CLI's session id; locates the transcript the summarizer digests
 	Summary   string              // last persisted monitor summary, seeds the cockpit's cache
 	SummaryAt time.Time           // when that summary was generated
 	Pinned    bool                // kept at the top of the board
@@ -107,6 +108,7 @@ func assembleBoard(manifests []*session.Manifest, alive func(name string) bool) 
 			ID:        m.ID,
 			Repo:      m.Repo,
 			Account:   m.Account,
+			Agent:     m.Agent,
 			Age:       age(m.CreatedAt),
 			Branch:    m.Branch,
 			Title:     m.Title,
@@ -189,7 +191,7 @@ func filterRows(rows []boardRow, query string, archivedOnly bool) []boardRow {
 
 // rowMatches reports whether any of a row's visible fields contains q (lowercased).
 func rowMatches(r boardRow, q string) bool {
-	for _, f := range []string{r.State, r.Mode, r.Account, r.ID, r.Repo, r.Branch, r.Title} {
+	for _, f := range []string{r.State, r.Mode, r.Account, mustDriver(r.Agent).Name(), r.ID, r.Repo, r.Branch, r.Title} {
 		if strings.Contains(strings.ToLower(f), q) {
 			return true
 		}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/git"
-	"github.com/boratanrikulu/kovan/internal/mode"
 	"github.com/boratanrikulu/kovan/internal/session"
 )
 
@@ -58,21 +57,18 @@ func addWorkspace(m *session.Manifest, target, from, branch string) (ws session.
 	return ws, false, nil
 }
 
-// recordWorkspace appends ws to the agent's manifest and refreshes its
-// CLAUDE.local.md. The manifest is re-read first: a setup hook can run for
+// recordWorkspace appends ws to the agent's manifest. The manifest is re-read
+// first: a setup hook can run for
 // minutes, and the board, the monitor and the gate hook write the same file
 // meanwhile.
 func recordWorkspace(m *session.Manifest, ws session.Workspace) error {
-	fresh, err := session.ReadByTmux(m.Tmux)
-	if err != nil {
+	if err := session.Update(m.Tmux, func(fresh *session.Manifest) error {
+		fresh.Extra = append(fresh.Extra, ws)
+		*m = *fresh
+		return nil
+	}); err != nil {
 		return err
 	}
-	fresh.Extra = append(fresh.Extra, ws)
-	if err := fresh.Write(); err != nil {
-		return err
-	}
-	*m = *fresh
-	refreshClaudeLocal(m)
 	return nil
 }
 
@@ -150,12 +146,11 @@ func adoptWorkspace(m *session.Manifest, name, main, worktree string) (session.W
 }
 
 // checkListable refuses a repo name, path or branch that cannot be listed as
-// one line of CLAUDE.local.md: a newline would start a line of its own, a
-// backtick would end the code span that keeps an @ in it from reading as an
-// import.
+// one line of the agent's method: a newline would start a line of its own, a
+// backtick would end the code span it sits in.
 func checkListable(field string) error {
 	if strings.ContainsAny(field, "\n\r`") {
-		return fmt.Errorf("%q has a newline or backtick; kovan cannot list it in CLAUDE.local.md safely", field)
+		return fmt.Errorf("%q has a newline or backtick; kovan cannot list it in the agent's method safely", field)
 	}
 	return nil
 }
@@ -261,23 +256,18 @@ func removeWorkspace(m *session.Manifest, target string, force bool) (session.Wo
 	if err := teardownWorkspace(m, ws); err != nil {
 		return ws, err
 	}
-	fresh, err := session.ReadByTmux(m.Tmux)
-	if err != nil {
-		return ws, err
-	}
-	var kept []session.Workspace
-	for _, w := range fresh.Extra {
-		if w.Worktree != ws.Worktree {
-			kept = append(kept, w)
+	err := session.Update(m.Tmux, func(fresh *session.Manifest) error {
+		var kept []session.Workspace
+		for _, w := range fresh.Extra {
+			if w.Worktree != ws.Worktree {
+				kept = append(kept, w)
+			}
 		}
-	}
-	fresh.Extra = kept
-	if err := fresh.Write(); err != nil {
-		return ws, err
-	}
-	*m = *fresh
-	refreshClaudeLocal(m)
-	return ws, nil
+		fresh.Extra = kept
+		*m = *fresh
+		return nil
+	})
+	return ws, err
 }
 
 // extraIndex finds the extra workspace target names, by repo or by a path
@@ -353,37 +343,4 @@ func sharedWorkspace(exceptTmux, worktree string) bool {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// refreshClaudeLocal re-renders the managed block in the primary worktree's
-// CLAUDE.local.md so it lists m's workspaces. It only rewrites a block m owns:
-// a --quick agent has none, and a tab sharing a worktree leaves its host's
-// alone. Best-effort, since the workspace itself is already recorded.
-func refreshClaudeLocal(m *session.Manifest) {
-	data, err := os.ReadFile(filepath.Join(m.Worktree, claudeLocalFile))
-	if err != nil || !ownsClaudeLocal(string(data), m.ID) {
-		return
-	}
-	if err := renderClaudeLocal(m); err != nil {
-		fmt.Fprintf(os.Stderr, "kovan: update %s: %v\n", claudeLocalFile, err)
-	}
-}
-
-// renderClaudeLocal writes the managed block for m from its manifest, resolving
-// the mode, domain and task-doc dir the same way start does.
-func renderClaudeLocal(m *session.Manifest) error {
-	home, err := config.Dir()
-	if err != nil {
-		return err
-	}
-	cfg, err := config.LoadRepo(home, m.Repo)
-	if err != nil {
-		return err
-	}
-	taskMode, err := mode.Load(home, resolveMode(m.TaskMode, cfg.Mode, ""))
-	if err != nil {
-		return err
-	}
-	taskAbs := taskDocsDir(home, m.Repo, cfg.Task.Dir, m.ID)
-	return writeClaudeLocal(m.Worktree, m.ID, m.Title, taskAbs, m.Account, cfg.Domain, m.Repo, taskMode, m.Extra)
 }

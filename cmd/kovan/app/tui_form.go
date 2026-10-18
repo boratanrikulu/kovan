@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/mode"
 	"github.com/boratanrikulu/kovan/internal/session"
@@ -39,7 +39,9 @@ type formModel struct {
 	repo            string   // repo the agent will be created in (header context)
 	modes           []string // available task modes (always non-empty: the built-ins)
 	mode            int      // selected index into modes
-	accounts        []string // configured account names; empty hides the field
+	agents          []string // every known agent CLI
+	agent           int      // selected index into agents
+	accounts        []string // the selected agent CLI's accounts; empty hides the field
 	account         int      // selected index into accounts
 	colors          []string // stripe color choices: "none" + the palette names
 	color           int      // selected index into colors
@@ -112,15 +114,47 @@ func newForm() formModel {
 		}
 		f.mode = indexOf(f.modes, defaultMode)
 	}
-	if g, err := config.LoadGlobal(); err == nil && len(g.Accounts) > 0 {
-		for name := range g.Accounts {
-			f.accounts = append(f.accounts, name)
-		}
-		sort.Strings(f.accounts)
-		f.accounts = accountPicks(f.accounts)
-		f.account = indexOf(f.accounts, g.DefaultAccount)
-	}
+	f.agents = agent.Names()
+	f = f.resetAgent()
 	return f
+}
+
+// resetAgent preselects the agent CLI the project would get by default (its
+// repo config, else the global one) and lists that CLI's accounts.
+func (f formModel) resetAgent() formModel {
+	g, err := config.LoadGlobal()
+	if err != nil {
+		return f
+	}
+	repoAgent := ""
+	if home, err := config.Dir(); err == nil && f.repo != "" {
+		if r, err := config.LoadRepo(home, f.repo); err == nil {
+			repoAgent = r.Agent
+		}
+	}
+	f.agent = indexOf(f.agents, mustDriver(resolveAgentName("", repoAgent, g.Agent)).Name())
+	return f.refilterAccounts()
+}
+
+// refilterAccounts lists the selected agent CLI's accounts, the default
+// account selected when it belongs to that CLI.
+func (f formModel) refilterAccounts() formModel {
+	f.accounts, f.account = nil, 0
+	g, err := config.LoadGlobal()
+	if err != nil {
+		return f
+	}
+	f.accounts = accountsFor(g, f.selectedAgent())
+	f.account = indexOf(f.accounts, g.DefaultAccount)
+	return f
+}
+
+// selectedAgent is the chosen agent CLI.
+func (f formModel) selectedAgent() string {
+	if len(f.agents) == 0 {
+		return agent.Claude
+	}
+	return f.agents[f.agent]
 }
 
 // projectPicker is a searchable list of repos to spawn the agent in: the known
@@ -437,7 +471,7 @@ func (f formModel) selectedColor() string {
 // toggle, the from picker, the mode picker, the optional account picker, the
 // color picker, and the brief textarea (always last).
 func (f formModel) total() int {
-	n := len(f.inputs) + 6 // + project + target + from + mode + color + brief
+	n := len(f.inputs) + 7 // + project + target + from + mode + agent + color + brief
 	if len(f.accounts) > 0 {
 		n++
 	}
@@ -452,12 +486,14 @@ func (f formModel) onFrom() bool { return f.focus == len(f.inputs)+2 }
 
 func (f formModel) onMode() bool { return f.focus == len(f.inputs)+3 }
 
+func (f formModel) onAgent() bool { return f.focus == len(f.inputs)+4 }
+
 func (f formModel) onAccount() bool {
-	return len(f.accounts) > 0 && f.focus == len(f.inputs)+4
+	return len(f.accounts) > 0 && f.focus == len(f.inputs)+5
 }
 
 func (f formModel) onColor() bool {
-	n := len(f.inputs) + 4
+	n := len(f.inputs) + 5
 	if len(f.accounts) > 0 {
 		n++
 	}
@@ -515,6 +551,17 @@ func (f formModel) update(msg tea.Msg) (formModel, tea.Cmd) {
 			}
 			return f, nil
 		}
+		if f.onAgent() && len(f.agents) > 0 {
+			switch key.String() {
+			case "left", "h", "up":
+				f.agent = (f.agent - 1 + len(f.agents)) % len(f.agents)
+			case "right", "l", "down":
+				f.agent = (f.agent + 1) % len(f.agents)
+			default:
+				return f, nil
+			}
+			return f.refilterAccounts(), nil
+		}
 		if f.onAccount() {
 			switch key.String() {
 			case "left", "h", "up":
@@ -534,7 +581,7 @@ func (f formModel) update(msg tea.Msg) (formModel, tea.Cmd) {
 			return f, nil
 		}
 	}
-	if f.onProject() || f.onTarget() || f.onFrom() || f.onMode() || f.onAccount() || f.onColor() {
+	if f.onProject() || f.onTarget() || f.onFrom() || f.onMode() || f.onAgent() || f.onAccount() || f.onColor() {
 		return f, nil
 	}
 	if f.onBrief() {
@@ -560,7 +607,7 @@ func (f formModel) reloadProjectRefs(before string) formModel {
 	f.checkoutBranch = checkoutHeldBranch(after)
 	f.checkoutCurrent = currentBranch(after)
 	f.repo = filepath.Base(after)
-	return f
+	return f.resetAgent() // the new project's default agent
 }
 
 // setOption applies a click on the options panel: the focused field's
@@ -595,6 +642,11 @@ func (f formModel) setOption(idx int) formModel {
 	case f.onMode():
 		if idx < len(f.modes) {
 			f.mode = idx
+		}
+	case f.onAgent():
+		if idx < len(f.agents) {
+			f.agent = idx
+			return f.refilterAccounts()
 		}
 	case f.onAccount():
 		if idx < len(f.accounts) {
@@ -680,9 +732,10 @@ func (f formModel) fieldColumn() ([]string, []int) {
 	if len(f.modes) > 0 {
 		add(fieldRow("mode", f.modes[f.mode], f.onMode()), n+3)
 	}
-	color := n + 4
+	add(fieldRow("agent", f.selectedAgent(), f.onAgent()), n+4)
+	color := n + 5
 	if len(f.accounts) > 0 {
-		add(fieldRow("account", f.accounts[f.account], f.onAccount()), n+4)
+		add(fieldRow("account", f.accounts[f.account], f.onAccount()), n+5)
 		color++
 	}
 	add(fieldRow("color", colorPreview(f.colors[f.color]), f.onColor()), color)
@@ -784,6 +837,16 @@ func (f formModel) focusedOptions() (title string, items []string, sel int, sear
 		return label + " · type to filter · ↑/↓ select", it, f.from.sel, f.from.query, true
 	case f.onMode():
 		return "mode · ↑/↓ choose", f.modes, f.mode, "", false
+	case f.onAgent():
+		var labels []string
+		g, err := config.LoadGlobal()
+		for _, a := range f.agents {
+			if err == nil {
+				a = agentLabel(g, a)
+			}
+			labels = append(labels, a)
+		}
+		return "agent · ↑/↓ choose · the CLI that runs the task", labels, f.agent, "", false
 	case f.onAccount():
 		return "account · ↑/↓ choose", f.accounts, f.account, "", false
 	case f.onColor():
@@ -810,7 +873,7 @@ func (f formModel) recap() []string {
 		account = "—"
 	}
 	cl, cv := f.ctxCollapsed()
-	how := "mode · " + mode + "   account · " + account
+	how := "mode · " + mode + "   agent · " + f.selectedAgent() + "   account · " + account
 	if c := f.selectedColor(); c != "" {
 		how += "   color · " + c
 	}

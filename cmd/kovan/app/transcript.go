@@ -1,27 +1,53 @@
 package app
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
+
+	"github.com/boratanrikulu/kovan/internal/agent"
+	"github.com/boratanrikulu/kovan/internal/config"
+	"github.com/boratanrikulu/kovan/internal/session"
 )
 
 // transcriptPaths caches session id → transcript path. The glob that resolves
-// a transcript walks every dir under ~/.claude/projects and dominates the
-// board's refresh cost, while the answer never changes for a live session —
-// so it is resolved once and re-globbed only if the cached file stops being
-// readable.
+// a transcript walks every project dir under the CLI's home and dominates the
+// board's refresh cost, while the answer never changes for a live session, so
+// it is resolved once and re-globbed only if the cached file stops being
+// readable. Session ids are UUIDs, unique across CLIs.
 var transcriptPaths sync.Map
 
-// transcriptTail returns up to the last max bytes of the session's transcript
-// — ~/.claude/projects/*/<id>.jsonl, no path-encoding logic needed — resolving
-// the path once and re-globbing only when the cached file goes away.
-func transcriptTail(sessionID string, max int64) ([]byte, bool) {
-	path, ok := transcriptPath(sessionID)
+// convo is an agent's conversation on disk: which CLI wrote it, that CLI's
+// home, and the session id.
+type convo struct {
+	d    agent.Driver
+	home string
+	id   string
+}
+
+// convoOf locates the conversation of an agent running under account. Only a
+// CLI whose home an account can move (codex) needs the config to find it.
+func convoOf(agentName, account, id string) convo {
+	d := mustDriver(agentName)
+	home := d.DefaultHome()
+	if account != "" && d.HomeEnv() != "" {
+		if global, err := config.LoadGlobal(); err == nil {
+			home = agentHome(global, d, account)
+		}
+	}
+	return convo{d: d, home: home, id: id}
+}
+
+// manifestConvo is the conversation of the agent a manifest describes.
+func manifestConvo(m *session.Manifest) convo {
+	return convoOf(m.Agent, m.Account, m.SessionID)
+}
+
+// tail returns up to the last max bytes of the transcript, resolving the path
+// once and re-globbing only when the cached file goes away.
+func (c convo) tail(max int64) ([]byte, bool) {
+	path, ok := c.path()
 	if !ok {
 		return nil, false
 	}
@@ -32,35 +58,30 @@ func transcriptTail(sessionID string, max int64) ([]byte, bool) {
 	return tail, true
 }
 
-// transcriptPath locates an agent's conversation on disk, caching the hit. Not
-// found means the agent tool has expired it — Claude Code prunes transcripts on
-// a retention window (30 days by default), long before a kovan agent's worktree
-// and notes go anywhere.
-func transcriptPath(sessionID string) (string, bool) {
-	if sessionID == "" {
+// path locates the transcript, caching the hit. Not found means the CLI has
+// expired it: Claude Code prunes transcripts on a retention window (30 days by
+// default), long before a kovan agent's worktree and notes go anywhere.
+func (c convo) path() (string, bool) {
+	if c.id == "" {
 		return "", false
 	}
-	if p, ok := transcriptPaths.Load(sessionID); ok {
+	if p, ok := transcriptPaths.Load(c.id); ok {
 		if _, err := os.Stat(p.(string)); err == nil {
 			return p.(string), true
 		}
-		transcriptPaths.Delete(sessionID)
+		transcriptPaths.Delete(c.id)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", false
-	}
-	matches, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
+	matches, err := filepath.Glob(c.d.TranscriptGlob(c.home, c.id))
 	if err != nil || len(matches) == 0 {
 		return "", false
 	}
-	transcriptPaths.Store(sessionID, matches[0])
+	transcriptPaths.Store(c.id, matches[0])
 	return matches[0], true
 }
 
-// transcriptExists reports whether an agent still has a conversation to resume.
-func transcriptExists(sessionID string) bool {
-	_, ok := transcriptPath(sessionID)
+// exists reports whether an agent still has a conversation to resume.
+func (c convo) exists() bool {
+	_, ok := c.path()
 	return ok
 }
 
@@ -88,95 +109,14 @@ func readTail(path string, max int64) ([]byte, error) {
 // of kilobytes, and the window must still reach past it to real turns.
 const digestTailBytes = 256 << 10
 
-// digestMaxEntries caps how many conversation entries a digest carries.
-const digestMaxEntries = 40
-
-// Clip widths for digest entries, in runes.
-const (
-	digestTextClip = 300
-	digestToolClip = 120
-)
-
-// transcriptDigest renders the tail of an agent's conversation as short
-// labeled lines — real turns only. Text sitting unsent in the agent's input
-// box never reaches the transcript, so it cannot leak into a summary. Empty
-// when the session has no transcript (or nothing summarizable yet).
-func transcriptDigest(sessionID string) string {
-	tail, ok := transcriptTail(sessionID, digestTailBytes)
+// digest renders the tail of the conversation as short labeled lines, real
+// turns only. Text sitting unsent in the agent's input box never reaches the
+// transcript, so it cannot leak into a summary. Empty when there is no
+// transcript (or nothing summarizable yet).
+func (c convo) digest() string {
+	tail, ok := c.tail(digestTailBytes)
 	if !ok {
 		return ""
 	}
-	return digest(tail)
-}
-
-// The slices of a transcript line the digest reads. Message content is either
-// a plain string (a typed human turn) or an array of blocks (assistant text /
-// tool_use, or a user-side tool_result).
-type transcriptRecord struct {
-	Type    string `json:"type"`
-	Message struct {
-		Content json.RawMessage `json:"content"`
-	} `json:"message"`
-}
-
-type contentBlock struct {
-	Type  string         `json:"type"`
-	Text  string         `json:"text"`
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input"`
-}
-
-// digest parses transcript JSONL into labeled entries: "you:" for what the
-// human actually sent, "agent:" for the agent's replies, "agent ran" for its
-// tool calls. Everything else (tool results, thinking, system records) is
-// skipped, as is any unparseable line — the tail may open mid-record.
-func digest(tail []byte) string {
-	var entries []string
-	for _, line := range bytes.Split(tail, []byte("\n")) {
-		var rec transcriptRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
-		}
-		switch rec.Type {
-		case "user":
-			var text string
-			if err := json.Unmarshal(rec.Message.Content, &text); err != nil {
-				continue // array content is a tool_result, not a human turn
-			}
-			if s := oneLine(text); s != "" {
-				entries = append(entries, "you: "+clip(s, digestTextClip))
-			}
-		case "assistant":
-			var blocks []contentBlock
-			if err := json.Unmarshal(rec.Message.Content, &blocks); err != nil {
-				continue
-			}
-			for _, b := range blocks {
-				switch b.Type {
-				case "text":
-					if s := oneLine(b.Text); s != "" {
-						entries = append(entries, "agent: "+clip(s, digestTextClip))
-					}
-				case "tool_use":
-					entries = append(entries, toolEntry(b))
-				}
-			}
-		}
-	}
-	if len(entries) > digestMaxEntries {
-		entries = entries[len(entries)-digestMaxEntries:]
-	}
-	return strings.Join(entries, "\n")
-}
-
-// toolEntry renders a tool_use block as one line: the tool name plus the most
-// telling scrap of its input.
-func toolEntry(b contentBlock) string {
-	e := "agent ran " + b.Name
-	for _, key := range []string{"description", "command", "file_path", "prompt"} {
-		if v, ok := b.Input[key].(string); ok && v != "" {
-			return e + ": " + clip(oneLine(v), digestToolClip)
-		}
-	}
-	return e
+	return c.d.Digest(tail)
 }

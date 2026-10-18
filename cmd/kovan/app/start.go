@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/git"
 	"github.com/boratanrikulu/kovan/internal/mode"
@@ -18,12 +20,13 @@ import (
 )
 
 var (
-	startFrom    string
-	startAccount string
-	startMode    string
-	startQuick   bool
-	startInPlace bool
-	startIn      string
+	startFrom      string
+	startAccount   string
+	startAgentName string
+	startMode      string
+	startQuick     bool
+	startInPlace   bool
+	startIn        string
 )
 
 var startCmd = &cobra.Command{
@@ -42,7 +45,8 @@ when it needs you or is done.`,
 
 func init() {
 	startCmd.Flags().StringVar(&startFrom, "from", "", "base branch for the new worktree (with --in-place, the branch to work on); overrides config and autodetect")
-	startCmd.Flags().StringVar(&startAccount, "account", "", "Claude account to run the agent under (see accounts in config)")
+	startCmd.Flags().StringVar(&startAccount, "account", "", "account to run the agent under (see accounts in config)")
+	startCmd.Flags().StringVar(&startAgentName, "agent", "", "agent CLI to run: claude | codex (overrides the repo and global default)")
 	startCmd.Flags().StringVar(&startMode, "mode", "", "task mode: code | review | analyze | write | … (overrides the repo default)")
 	startCmd.Flags().BoolVar(&startQuick, "quick", false, "skip the brief editor; launch with the title as the goal")
 	startCmd.Flags().BoolVar(&startInPlace, "in-place", false, "run in this checkout on the --from branch (a second agent here joins as a tab), no separate worktree")
@@ -54,7 +58,10 @@ func runStart(id, title string) error {
 	if err != nil {
 		return err
 	}
-	spec, err := scaffoldAgent(repo.Root, id, title, startFrom, startAccount, startMode, "", startInPlace, startIn, briefInput{})
+	spec, err := scaffoldAgent(repo.Root, id, title, startOpts{
+		From: startFrom, Account: startAccount, Agent: startAgentName, Mode: startMode,
+		InPlace: startInPlace, In: startIn,
+	})
 	if err != nil {
 		return err
 	}
@@ -69,6 +76,9 @@ func runStart(id, title string) error {
 		return err
 	}
 	m := res.Manifest
+	if res.Warning != "" {
+		fmt.Fprintln(os.Stderr, "kovan: warning: "+res.Warning)
+	}
 	switch {
 	case res.Tab:
 		fmt.Printf("Running as a tab in %s on branch %s\n", m.Worktree, m.Branch)
@@ -92,19 +102,33 @@ func runStart(id, title string) error {
 // startResult reports what a launch created.
 type startResult struct {
 	Manifest *session.Manifest
-	Reused   bool // the branch already existed and was checked out, not created
-	Tab      bool // spawned as a guest tab in an existing worktree (--in)
+	Reused   bool   // the branch already existed and was checked out, not created
+	Tab      bool   // spawned as a guest tab in an existing worktree (--in)
+	Warning  string // set when the agent's CLI has no kovan hooks
+}
+
+// startOpts are a new agent's choices beyond its id and title. Empty fields
+// resolve to the repo's and then the global defaults.
+type startOpts struct {
+	From    string // base branch (in-place: the branch to work on)
+	Account string
+	Agent   string // the agent CLI
+	Mode    string // the task mode
+	Color   string
+	InPlace bool
+	In      string // the agent whose worktree this one joins as a tab
+	Brief   briefInput
 }
 
 // startAgent scaffolds and launches in one step, without opening the editor —
 // the convenience entry for callers that don't run the brief flow. It targets
 // the repo containing the current directory.
-func startAgent(id, title, from, account, modeFlag, color string, inPlace bool, in string) (startResult, error) {
+func startAgent(id, title string, o startOpts) (startResult, error) {
 	repo, err := openRepo()
 	if err != nil {
 		return startResult{}, err
 	}
-	spec, err := scaffoldAgent(repo.Root, id, title, from, account, modeFlag, color, inPlace, in, briefInput{})
+	spec, err := scaffoldAgent(repo.Root, id, title, o)
 	if err != nil {
 		return startResult{}, err
 	}
@@ -164,7 +188,13 @@ type briefInput struct {
 // scaffoldAgent creates the worktree + branch, runs the setup hook, scaffolds
 // the task docs, and builds (but does not write) the manifest. On any error it
 // rolls the worktree back so a failed scaffold leaves nothing behind.
-func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, inPlace bool, in string, brief briefInput) (spec *agentSpec, err error) {
+func scaffoldAgent(repoRoot, id, title string, o startOpts) (spec *agentSpec, err error) {
+	from, account, modeFlag, color, inPlace, in, brief := o.From, o.Account, o.Mode, o.Color, o.InPlace, o.In, o.Brief
+	// A chosen agent is a CLI's name: it lands in the launch command, so only a
+	// config file, which the user writes, may name a binary path instead.
+	if o.Agent != "" && !slices.Contains(agent.Names(), o.Agent) {
+		return nil, fmt.Errorf("unknown agent %q (known: %s)", o.Agent, strings.Join(agent.Names(), ", "))
+	}
 	guest := in != ""
 	if guest && inPlace {
 		return nil, fmt.Errorf("--in and --in-place are mutually exclusive")
@@ -192,7 +222,14 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 
 	// Resolve and validate the account before creating anything, so a missing
 	// token file fails fast without spawning a worktree.
-	account = resolveAccount(account, repoCfg.Account, global.DefaultAccount)
+	agentName := resolveAgentName(o.Agent, repoCfg.Agent, global.Agent)
+	d, err := driverOf(agentName)
+	if err != nil {
+		return nil, err
+	}
+	if account, err = accountFor(global, d, account, repoCfg.Account); err != nil {
+		return nil, err
+	}
 	if _, err := accountTokenFile(global, account); err != nil {
 		return nil, err
 	}
@@ -304,9 +341,6 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 	if err := repo.AddExclude(".kovan/session.yaml"); err != nil {
 		return nil, err
 	}
-	if err := repo.AddExclude(claudeLocalFile); err != nil {
-		return nil, err
-	}
 
 	// The setup hook warms a fresh worktree's build caches; in-place reuses the
 	// checkout's and a guest tab reuses its host worktree's, so both skip it.
@@ -349,10 +383,13 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 	}
 
 	// A known session id makes the agent's transcript findable, so the board can
-	// read the live permission mode from it (the hook can't see mode toggles).
-	sessionID, err := session.NewID()
-	if err != nil {
-		return nil, err
+	// read the live permission mode from it (the hook can't see mode toggles). A
+	// CLI that picks its own id reports it on its first hook instead.
+	sessionID := ""
+	if d.PresetID() {
+		if sessionID, err = session.NewID(); err != nil {
+			return nil, err
+		}
 	}
 	m := &session.Manifest{
 		ID:        id,
@@ -364,7 +401,7 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 		Base:      base,
 		InPlace:   inPlace,
 		Tmux:      sessionName(repoName, id),
-		Agent:     global.Agent,
+		Agent:     agentName,
 		Account:   account,
 		SessionID: sessionID,
 		State:     "working",
@@ -482,15 +519,8 @@ func launchScaffolded(spec *agentSpec, quick bool) (res startResult, err error) 
 		spec.rollback()
 	}()
 
-	// A throwaway (--quick) task gets no maintenance protocol; a briefed one gets
-	// a CLAUDE.local.md pointer the agent reads every session. A guest tab leaves
-	// the shared file alone (it belongs to the worktree's first tab) and is briefed
-	// through its opening prompt and task-doc dir instead.
-	if !quick && !spec.tab {
-		if err := writeClaudeLocal(m.Worktree, m.ID, m.Title, spec.taskAbs, m.Account, spec.domain, m.Repo, spec.mode, m.Extra); err != nil {
-			return res, err
-		}
-	}
+	// A throwaway (--quick) task carries the method layers but no task protocol.
+	m.Quick = quick
 
 	sess, err := runnerSession(m, launchFresh, openingPrompt(spec, quick))
 	if err != nil {
@@ -503,7 +533,11 @@ func launchScaffolded(spec *agentSpec, quick bool) (res startResult, err error) 
 	if err := m.Write(); err != nil {
 		return res, err
 	}
-	return startResult{Manifest: m, Reused: spec.reused, Tab: spec.tab}, nil
+	res = startResult{Manifest: m, Reused: spec.reused, Tab: spec.tab}
+	if global, err := config.LoadGlobal(); err == nil {
+		res.Warning = hooksWarning(global, mustDriver(m.Agent), m.Account)
+	}
+	return res, nil
 }
 
 // openingPrompt renders the task mode's prompt, pointing the agent at its brief

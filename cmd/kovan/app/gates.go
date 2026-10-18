@@ -1,32 +1,20 @@
 package app
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 )
-
-// hookDecision is the PreToolUse permission decision kovan emits to escalate a
-// gated command to the user.
-type hookDecision struct {
-	HookSpecificOutput struct {
-		HookEventName            string `json:"hookEventName"`
-		PermissionDecision       string `json:"permissionDecision"`
-		PermissionDecisionReason string `json:"permissionDecisionReason"`
-	} `json:"hookSpecificOutput"`
-}
 
 // gateInput is everything the built-in gates need about a pending tool call.
 // Passing scalars (not the manifest) keeps evalGates a pure, testable decision.
 type gateInput struct {
-	toolName   string
-	command    string   // Bash command
-	filePath   string   // Edit/Write target
+	kind       agent.ToolKind
+	command    string   // the shell command
+	filePath   string   // the file an edit writes
 	readOnly   bool     // the agent's mode is read-only
 	worktree   string   // the agent workspace holding the edited file, to scope the posture gates
 	writePaths []string // worktree-relative prefixes the mode may write to
@@ -48,9 +36,6 @@ const (
 	writePathsReason    = "kovan: write outside the mode's write paths — confirm or write within them"
 )
 
-// editTools are the tools that modify files directly (not via the shell).
-var editTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, "NotebookEdit": true}
-
 // ask is a built-in gate's decision: always the "ask" action.
 func ask(reason string) gateResult {
 	return gateResult{reason: reason, action: "ask"}
@@ -64,7 +49,7 @@ func evalGates(in gateInput, gates config.Gates) gateResult {
 	// outside its allowed prefixes. Writes to the task-doc store (outside the
 	// worktree, reached via --add-dir) pass, so the agent still writes its
 	// artifact.
-	if editTools[in.toolName] && withinWorktree(in.filePath, in.worktree) &&
+	if in.kind == agent.ToolEdit && withinWorktree(in.filePath, in.worktree) &&
 		!withinWritePaths(in.filePath, in.worktree, in.writePaths) {
 		if in.readOnly && gates.ReadOnly == "ask" {
 			return ask(readOnlyReason)
@@ -74,20 +59,40 @@ func evalGates(in gateInput, gates config.Gates) gateResult {
 		}
 	}
 
-	if in.toolName != "Bash" {
+	if in.kind != agent.ToolShell {
 		return gateResult{}
 	}
+	var results []gateResult
 	for _, seg := range splitSegments(in.command) {
-		if r := matchSegment(seg, gates, in.branch); r.reason != "" {
-			return r
-		}
+		results = append(results, matchSegment(seg, gates, in.branch))
 	}
-	return gateResult{}
+	return strongest(results)
 }
 
-// matchSegment recognizes a gated command in a single segment: the built-in git
-// and gh/curl gates first, then the user-defined regex patterns.
+// strongest is the decision a set of gate results adds up to: any deny wins,
+// else the first ask, else none. Letting the first match win would let an ask
+// for one part of a command cover a denied other part.
+func strongest(results []gateResult) gateResult {
+	var first gateResult
+	for _, r := range results {
+		if r.action == "deny" {
+			return r
+		}
+		if first.reason == "" {
+			first = r
+		}
+	}
+	return first
+}
+
+// matchSegment recognizes a gated command in a single segment: a deny pattern
+// first, since it outranks every ask; then the built-in git and gh/curl gates,
+// then the remaining user patterns.
 func matchSegment(seg string, gates config.Gates, branch string) gateResult {
+	pattern := patternGate(seg, gates)
+	if pattern.action == "deny" {
+		return pattern
+	}
 	t := effectiveTokens(seg)
 	if r := gitGate(t, gates, branch); r.reason != "" {
 		return r
@@ -95,7 +100,7 @@ func matchSegment(seg string, gates config.Gates, branch string) gateResult {
 	if r := ghCurlGate(seg, t, gates); r.reason != "" {
 		return r
 	}
-	return patternGate(seg, gates)
+	return pattern
 }
 
 // gitGate gates git push (the push gate) and git commit (the default-branch
@@ -151,9 +156,11 @@ func looksLikeWrite(seg string) bool {
 	return false
 }
 
-// patternGate applies the user-defined gates. A bad regexp is skipped, never
-// fatal — a typo in config must not wedge every tool call.
+// patternGate applies the user-defined gates: a deny among the patterns that
+// match wins, wherever it sits in the list, else the first ask. A bad regexp
+// is skipped, never fatal: a typo in config must not wedge every tool call.
 func patternGate(seg string, gates config.Gates) gateResult {
+	var results []gateResult
 	for _, p := range gates.Patterns {
 		action := p.Action
 		if action == "" {
@@ -171,10 +178,10 @@ func patternGate(seg string, gates config.Gates) gateResult {
 			if reason == "" {
 				reason = "kovan: gated command"
 			}
-			return gateResult{reason: reason, action: action}
+			results = append(results, gateResult{reason: reason, action: action})
 		}
 	}
-	return gateResult{}
+	return strongest(results)
 }
 
 // pushGated returns the push gate's reason when it is active, else "".
@@ -328,19 +335,4 @@ func gitSubcommand(t []string) string {
 func isEnvAssign(tok string) bool {
 	eq := strings.IndexByte(tok, '=')
 	return eq > 0 && !strings.ContainsAny(tok[:eq], "/ ")
-}
-
-// writeDecision emits the gate decision as a single JSON object on exit 0.
-func writeDecision(w io.Writer, action, reason string) error {
-	if action == "" {
-		action = "ask"
-	}
-	var d hookDecision
-	d.HookSpecificOutput.HookEventName = "PreToolUse"
-	d.HookSpecificOutput.PermissionDecision = action
-	d.HookSpecificOutput.PermissionDecisionReason = reason
-	if err := json.NewEncoder(w).Encode(d); err != nil {
-		return fmt.Errorf("write decision: %w", err)
-	}
-	return nil
 }

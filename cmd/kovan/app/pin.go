@@ -14,13 +14,11 @@ func setPinned(id string, pinned bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m, err := session.ReadByTmux(name)
-	if err != nil {
-		return "", fmt.Errorf("read agent: %w", err)
-	}
-	m.Pinned = pinned
-	if err := m.Write(); err != nil {
-		return "", err
+	if err := session.Update(name, func(m *session.Manifest) error {
+		m.Pinned = pinned
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("pin agent: %w", err)
 	}
 	if pinned {
 		return fmt.Sprintf("Pinned %s.", id), nil

@@ -6,19 +6,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
+	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/runner"
 	"github.com/boratanrikulu/kovan/internal/session"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestSummarizeScript(t *testing.T) {
-	withTok := summarizeScript("claude", "/tok/company", nil, "opus", "INSTRUCT")
+	d := mustDriver(agent.Claude)
+	withTok := summarizeScript(`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/tok/company')" `, d, "claude", "opus", "INSTRUCT", "")
 	for _, want := range []string{`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/tok/company')"`, "claude", "--model 'opus'", "-p 'INSTRUCT'"} {
 		if !strings.Contains(withTok, want) {
 			t.Errorf("script missing %q:\n%s", want, withTok)
 		}
 	}
-	noTok := summarizeScript("claude", "", nil, "opus", "INSTRUCT")
+	noTok := summarizeScript("", d, "claude", "opus", "INSTRUCT", "")
 	if strings.Contains(noTok, "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("no-token script should not inject a token: %s", noTok)
 	}
@@ -298,8 +301,11 @@ func TestWrapJoin(t *testing.T) {
 // so it launches with that account's env too — otherwise a pin that the agents
 // rely on would silently not apply to their summaries.
 func TestSummarizeScriptAccountEnv(t *testing.T) {
-	env := map[string]string{"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]"}
-	got := summarizeScript("claude", "/tok/company", env, "opus", "INSTRUCT")
+	global := &config.Global{Accounts: map[string]config.Account{
+		"company": {Agent: agent.Claude, Env: map[string]string{"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]"}},
+	}}
+	d := mustDriver(agent.Claude)
+	got := summarizeScript(authPrefix(global, d, "company", "/tok/company"), d, "claude", "opus", "INSTRUCT", "")
 	want := `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ` +
 		`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/tok/company')" claude --model 'opus' -p 'INSTRUCT'`
 	if got != want {

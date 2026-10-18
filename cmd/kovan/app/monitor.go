@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/session"
 	"github.com/charmbracelet/bubbles/key"
@@ -21,7 +22,7 @@ const monitorRefresh = 60 * time.Second
 // staleWindow is how long a cached summary is trusted before it's re-generated.
 const staleWindow = 2 * time.Minute
 
-// summarySem caps how many `claude -p` summarizers run at once, so opening the
+// summarySem caps how many one-shot summarizers run at once, so opening the
 // monitor over many agents doesn't spawn a process per agent simultaneously.
 var summarySem = make(chan struct{}, 4)
 
@@ -70,51 +71,42 @@ func stale(s agentSummary, ok bool, force bool) bool {
 }
 
 // summarizeScript builds the shell command that runs the summarizer under the
-// agent's account: the token is read at exec time (never in argv/logs), the
-// instruction is the prompt, and the conversation digest is piped on stdin by
-// the caller.
-func summarizeScript(agent, tokenFile string, env map[string]string, model, instruction string) string {
-	cmd := agent
-	if model != "" {
-		cmd += " --model " + shellQuote(model)
-	}
-	cmd += " -p " + shellQuote(instruction)
-	if tokenFile != "" {
-		cmd = oauthEnvKey + "=" + tokenReadExpr(tokenFile) + " " + cmd
-	}
-	return envPrefix(env) + cmd
+// agent's account: prefix carries the account's environment (a token is read
+// at exec time, never in argv or logs), the instruction is the prompt, and the
+// conversation digest is piped on stdin by the caller.
+func summarizeScript(prefix string, d agent.Driver, bin, model, instruction, method string) string {
+	return prefix + d.OneShot(bin, model, instruction, method)
 }
 
-// summarizeCmd summarizes an agent's recent conversation with a one-shot
-// `claude -p` under the agent's own account. Concurrency is capped.
+// summaryMethod is the method the agent last launched with, so the summarizer
+// reads the conversation with the same context; "" before a first launch.
+func summaryMethod(tmux string) string {
+	home, err := config.Dir()
+	if err != nil {
+		return ""
+	}
+	if p := methodRunFile(home, tmux); fileExists(p) {
+		return p
+	}
+	return ""
+}
+
+// summarizeCmd summarizes an agent's recent conversation with a one-shot run
+// of its own CLI under its own account. Concurrency is capped.
 func summarizeCmd(global *config.Global, row boardRow) tea.Cmd {
 	return func() tea.Msg {
 		input, ok := summaryInput(row)
 		if !ok {
 			return summaryMsg{tmux: row.Tmux, err: true, text: "no conversation yet", state: row.State}
 		}
-		tokenFile, ferr := accountTokenFile(global, row.Account)
-		if ferr != nil {
-			tokenFile = "" // fall back to the logged-in account rather than failing
-		}
 		summarySem <- struct{}{}
 		defer func() { <-summarySem }()
 
-		// Run in the agent's worktree so the summarizer loads the same context the
-		// agent has (its CLAUDE.md / CLAUDE.local.md → the method), for a better-
-		// grounded read. KOVAN_MONITOR makes the gate hook a no-op for this helper
-		// (the hook resolves agents by cwd; without the guard its Stop → idle would
-		// corrupt the agent's manifest).
-		script := summarizeScript(global.Agent, tokenFile, accountEnv(global, row.Account), global.Monitor.Model, monitorInstruction)
-		cmd := exec.Command("sh", "-c", script)
-		cmd.Stdin = strings.NewReader(input)
-		cmd.Dir = row.Worktree
-		cmd.Env = append(os.Environ(), "KOVAN_MONITOR=1")
-		out, err := cmd.Output()
+		out, err := runOneShot(global, row.Agent, row.Account, row.Tmux, row.Worktree, monitorInstruction, input)
 		if err != nil {
 			return summaryMsg{tmux: row.Tmux, err: true, text: "summary failed", state: row.State}
 		}
-		text := strings.TrimSpace(string(out))
+		text := out
 		if text == "" {
 			text = "(no summary)"
 		}
@@ -123,12 +115,38 @@ func summarizeCmd(global *config.Global, row boardRow) tea.Cmd {
 	}
 }
 
+// runOneShot runs the agent's own CLI once under its account, in its worktree
+// and with its composed method, so the answer is read with the context the
+// agent has. The token, when the account has a good one, is read at exec time
+// (never in argv or logs); a bad one falls back to the CLI's own login rather
+// than failing. KOVAN_MONITOR makes the gate hook a no-op for this helper: the
+// hook resolves agents by cwd, and without the guard its Stop → idle would
+// rewrite the agent's state.
+func runOneShot(global *config.Global, agentName, account, tmux, worktree, instruction, input string) (string, error) {
+	d := mustDriver(agentName)
+	tokenFile, err := accountTokenFile(global, account)
+	if err != nil {
+		tokenFile = ""
+	}
+	script := summarizeScript(authPrefix(global, d, account, tokenFile), d,
+		agentBin(global, agentName), monitorModel(global, d), instruction, summaryMethod(tmux))
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Dir = worktree
+	cmd.Env = append(withoutEnv(os.Environ(), sessionEnv), "KOVAN_MONITOR=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // summaryInput builds the summarizer's stdin: the agent's task header, then
 // its conversation digest. The digest comes from the transcript — real turns
 // only, so the unsent draft the pane's input box may show can never read as a
 // sent prompt. False when the session has no transcript to digest yet.
 func summaryInput(row boardRow) (string, bool) {
-	d := transcriptDigest(row.SessionID)
+	d := convoOf(row.Agent, row.Account, row.SessionID).digest()
 	if d == "" {
 		return "", false
 	}
@@ -142,12 +160,10 @@ func summaryInput(row boardRow) (string, bool) {
 // capture/summarize errors never overwrite the last good one — and a write
 // failure is ignored: the summary still shows from memory.
 func persistSummary(tmux, text string) {
-	m, err := session.ReadByTmux(tmux)
-	if err != nil {
-		return
-	}
-	m.Summary, m.SummaryAt = text, time.Now()
-	_ = m.Write()
+	_ = session.Update(tmux, func(m *session.Manifest) error {
+		m.Summary, m.SummaryAt = text, time.Now()
+		return nil
+	})
 }
 
 // seedSummaries adopts the manifests' persisted summaries for agents the
@@ -440,6 +456,6 @@ func (m model) monitorView() string {
 		brandHeader(fmt.Sprintf("monitor · %d running", len(m.liveRows()))),
 		m.monitorVP.View(),
 		m.statusLine(),
-		dimStyle.Render("r refresh · j/k · PgUp/PgDn scroll · esc/S back · summaries: claude -p, per account"),
+		dimStyle.Render("r refresh · j/k · PgUp/PgDn scroll · esc/S back · summaries: each agent's CLI, per account"),
 	}, "\n")
 }

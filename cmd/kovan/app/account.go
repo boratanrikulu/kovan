@@ -6,10 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 )
-
-const oauthEnvKey = "CLAUDE_CODE_OAUTH_TOKEN"
 
 // systemAccount is the picker entry for injecting no token at all: the agent
 // runs under whatever account the machine is logged into. An injected token
@@ -48,6 +47,30 @@ func resolveAccount(flag, repoDefault, globalDefault string) string {
 	}
 }
 
+// acctAgent is the CLI an account belongs to; unset is claude.
+func acctAgent(acct config.Account) string {
+	if acct.Agent == "" {
+		return agent.Claude
+	}
+	return acct.Agent
+}
+
+// accountFor resolves an agent's account for driver d by precedence (the
+// explicit choice, the repo default, the global default). A default that
+// belongs to another CLI does not apply, so the agent runs under its CLI's own
+// login; an explicit choice that does not fit is an error.
+func accountFor(global *config.Global, d agent.Driver, explicit, repoDefault string) (string, error) {
+	account := resolveAccount(explicit, repoDefault, global.DefaultAccount)
+	acct, ok := global.Accounts[account]
+	if account == "" || !ok || acctAgent(acct) == d.Name() {
+		return account, nil
+	}
+	if account == explicit {
+		return "", fmt.Errorf("account %q is a %s account; this agent runs %s", account, acctAgent(acct), d.Name())
+	}
+	return "", nil
+}
+
 // accountTokenFile resolves an account name to its validated token-file path. An
 // empty account yields "" (the logged-in account, no token injected). It checks
 // the file exists and is not group/world-readable, but never reads the token —
@@ -59,6 +82,13 @@ func accountTokenFile(global *config.Global, account string) (string, error) {
 	acct, ok := global.Accounts[account]
 	if !ok {
 		return "", fmt.Errorf("account %q: not configured in ~/.kovan/config.yaml", account)
+	}
+	if acctAgent(acct) != agent.Claude {
+		// Only claude takes a token; the other CLIs log in once per home.
+		if acct.Home == "" {
+			return "", fmt.Errorf("account %q: a %s account needs a home (its own %s dir) in ~/.kovan/config.yaml", account, acct.Agent, acct.Agent)
+		}
+		return "", nil
 	}
 	info, err := os.Stat(acct.TokenFile)
 	if os.IsNotExist(err) {
@@ -106,14 +136,4 @@ func envPrefix(env map[string]string) string {
 		b.WriteString(k + "=" + shellQuote(env[k]) + " ")
 	}
 	return b.String()
-}
-
-// launchCommand builds the agent command, prefixing the account's extra
-// environment and the OAuth token env read from tokenFile when one is in play.
-func launchCommand(agent, prompt string, mode launchMode, tokenFile string, env map[string]string, addDirs []string, sessionID string) string {
-	cmd := agentCommand(agent, prompt, mode, addDirs, sessionID)
-	if tokenFile != "" {
-		cmd = oauthEnvKey + "=" + tokenReadExpr(tokenFile) + " " + cmd
-	}
-	return envPrefix(env) + cmd
 }

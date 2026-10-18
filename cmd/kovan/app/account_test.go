@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/session"
 )
@@ -59,16 +60,29 @@ func TestAccountTokenFile(t *testing.T) {
 	}
 }
 
+// launchLine is the start command runnerSession builds for a claude agent
+// under account (configured with env), with tokenFile as its token.
+func launchLine(account string, env map[string]string, tokenFile string, l agent.Launch) string {
+	global := &config.Global{Accounts: map[string]config.Account{}}
+	if account != "" {
+		global.Accounts[account] = config.Account{Agent: agent.Claude, Env: env}
+	}
+	d := mustDriver(agent.Claude)
+	return authPrefix(global, d, account, tokenFile) + d.Command(l)
+}
+
 func TestLaunchCommand(t *testing.T) {
-	if got := launchCommand("claude", "fix vfs", launchFresh, "", nil, []string{"/notes"}, "sid"); got != "claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'" {
+	fresh := agent.Launch{Bin: "claude", Prompt: "fix vfs", Dirs: []string{"/notes"}, SessionID: "sid"}
+	if got := launchLine("", nil, "", fresh); got != "claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'" {
 		t.Errorf("no account = %q", got)
 	}
-	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", nil, []string{"/notes"}, "sid")
+	got := launchLine("acct", nil, "/x/tok", fresh)
 	want := `CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'`
 	if got != want {
 		t.Errorf("with account = %q, want %q", got, want)
 	}
-	if got := launchCommand("claude", "ignored", launchResume, "/x/tok", nil, []string{"/notes"}, "sid"); !strings.HasSuffix(got, "claude --add-dir '/notes' --resume 'sid'") {
+	resume := agent.Launch{Bin: "claude", Dirs: []string{"/notes"}, SessionID: "sid", Resume: true}
+	if got := launchLine("acct", nil, "/x/tok", resume); !strings.HasSuffix(got, "claude --add-dir '/notes' --resume 'sid'") {
 		t.Errorf("resume = %q", got)
 	}
 	// The token value itself must never appear — only the path.
@@ -98,7 +112,7 @@ func TestRunnerSessionInjectsAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(sess.Cmd, oauthEnvKey+`="$(cat `) || !strings.Contains(sess.Cmd, tokenFile) {
+	if !strings.Contains(sess.Cmd, `CLAUDE_CODE_OAUTH_TOKEN="$(cat `) || !strings.Contains(sess.Cmd, tokenFile) {
 		t.Errorf("cmd should read the token file at launch, got %q", sess.Cmd)
 	}
 	if strings.Contains(sess.Cmd, "sk-secret") {
@@ -110,7 +124,7 @@ func TestRunnerSessionInjectsAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(plain.Cmd, oauthEnvKey) {
+	if strings.Contains(plain.Cmd, "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("no account should inject no token env, got %q", plain.Cmd)
 	}
 }
@@ -152,15 +166,16 @@ func TestLaunchCommandAccountEnv(t *testing.T) {
 		"ZZ_LAST":                      "1",
 		"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]",
 	}
-	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", env, []string{"/notes"}, "sid")
+	fresh := agent.Launch{Bin: "claude", Prompt: "fix vfs", Dirs: []string{"/notes"}, SessionID: "sid"}
+	got := launchLine("acct", env, "/x/tok", fresh)
 	want := `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ZZ_LAST='1' ` +
 		`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'`
 	if got != want {
 		t.Errorf("account env =\n%q\nwant\n%q", got, want)
 	}
 	// Env without an account still applies; no token is injected.
-	solo := launchCommand("claude", "g", launchFresh, "", env, []string{"/notes"}, "sid")
-	if strings.Contains(solo, oauthEnvKey) {
+	solo := launchLine("acct", env, "", agent.Launch{Bin: "claude", Prompt: "g", Dirs: []string{"/notes"}, SessionID: "sid"})
+	if strings.Contains(solo, "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("no token file should inject no token env, got %q", solo)
 	}
 	if !strings.HasPrefix(solo, "ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ") {

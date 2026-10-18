@@ -218,6 +218,12 @@ func parseLines(text string, schema map[string]nodeKind) []lineInfo {
 		if len(stack) > 0 {
 			parentPath, parentRaw = stack[len(stack)-1].path, stack[len(stack)-1].raw
 		}
+		if schema[parentPath] == kindFree {
+			// A free map's keys are the user's own (an env var, an agent name):
+			// a sample entry documents the map, not a key of the schema.
+			out = append(out, li)
+			continue
+		}
 		seg := key
 		if schema[parentPath] == kindMap {
 			seg = "*"

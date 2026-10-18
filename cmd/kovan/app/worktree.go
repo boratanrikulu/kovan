@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -54,7 +55,10 @@ adopted as-is, and removing the agent leaves an adopted worktree on disk.`,
 		if home, err := config.Dir(); err == nil {
 			fmt.Printf("Its private context: %s\n", filepath.Join(home, "projects", ws.Repo))
 		}
-		fmt.Printf("A running agent gains access with: /add-dir %s\n", ws.Worktree)
+		if mustDriver(m.Agent).Name() == agent.Claude {
+			fmt.Printf("A running agent gains access with: /add-dir %s\n", ws.Worktree)
+		}
+		fmt.Println("Its next wake grants it, and lists it in the agent's method.")
 		return nil
 	},
 }

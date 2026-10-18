@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 )
 
@@ -66,7 +67,7 @@ func TestRunInitLaunch(t *testing.T) {
 	repo := initRepo(t)
 
 	// A fake agent that records its cwd and args instead of launching Claude.
-	fake := filepath.Join(t.TempDir(), "fakeclaude")
+	fake := filepath.Join(t.TempDir(), "claude")
 	record := filepath.Join(t.TempDir(), "record")
 	script := "#!/usr/bin/env bash\npwd > " + record + "\nfor a in \"$@\"; do echo \"$a\" >> " + record + "; done\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
@@ -119,7 +120,7 @@ func TestRunInitInstallsHooks(t *testing.T) {
 	t.Setenv("HOME", claudeHome) // claudeDir → claudeHome/.claude
 	initRepo(t)
 
-	fake := filepath.Join(t.TempDir(), "fakeclaude")
+	fake := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestRunInitInstallsHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := readHooks(t, settings)
-	for _, ev := range gateHookEvents {
+	for _, ev := range mustDriver(agent.Claude).HookEvents() {
 		arr, _ := hooks[ev].([]any)
 		n := 0
 		for _, g := range arr {
@@ -169,7 +170,7 @@ func TestRunInitInjectsAccount(t *testing.T) {
 	initRepo(t)
 
 	// A fake agent that records its args and the token env it received.
-	fake := filepath.Join(t.TempDir(), "fakeclaude")
+	fake := filepath.Join(t.TempDir(), "claude")
 	record := filepath.Join(t.TempDir(), "record")
 	script := "#!/usr/bin/env bash\necho \"token=$CLAUDE_CODE_OAUTH_TOKEN\" > " + record + "\nfor a in \"$@\"; do echo \"$a\" >> " + record + "; done\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
@@ -212,7 +213,7 @@ func TestRunInitBadTokenFileDoesNotLaunch(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	initRepo(t)
 
-	fake := filepath.Join(t.TempDir(), "fakeclaude")
+	fake := filepath.Join(t.TempDir(), "claude")
 	record := filepath.Join(t.TempDir(), "record")
 	script := "#!/usr/bin/env bash\ntouch " + record + "\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
@@ -233,15 +234,11 @@ func TestRunInitBadTokenFileDoesNotLaunch(t *testing.T) {
 }
 
 func TestInitLaunch(t *testing.T) {
-	plain := initLaunch("claude", []string{"--add-dir", "/notes"}, "")
-	if filepath.Base(plain.Path) != "claude" || len(plain.Args) != 3 {
-		t.Errorf("no token file should exec the agent directly, got %v", plain.Args)
-	}
-	cmd := initLaunch("claude", []string{"--add-dir", "/notes"}, "/x/tok")
+	cmd := initLaunch(`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" `, "claude --add-dir '/notes' -- 'go'")
 	script := cmd.Args[len(cmd.Args)-1]
-	want := `CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" exec 'claude' '--add-dir' '/notes'`
+	want := `CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" exec claude --add-dir '/notes' -- 'go'`
 	if filepath.Base(cmd.Path) != "sh" || script != want {
-		t.Errorf("with token file = %q, want %q via sh", script, want)
+		t.Errorf("launch = %q, want %q via sh", script, want)
 	}
 }
 
@@ -256,5 +253,30 @@ func TestWriteOnboardPrompt(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(path); string(got) != "the brief\nfollow it" {
 		t.Errorf("prompt file content = %q", got)
+	}
+}
+
+// TestRunInitCodexIgnoresClaudeDefault: the default account belongs to
+// claude, so a codex onboarding runs under codex's own login instead of
+// demanding claude's token file.
+func TestRunInitCodexIgnoresClaudeDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KOVAN_HOME", home)
+	t.Setenv("HOME", t.TempDir())
+	initRepo(t)
+	fake := filepath.Join(t.TempDir(), "codex")
+	record := filepath.Join(t.TempDir(), "record")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho ran > "+record+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "agent: " + fake + "\naccounts:\n  personal: {token_file: " + filepath.Join(home, "absent") + "}\ndefault_account: personal\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit("", ""); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+	if _, err := os.Stat(record); err != nil {
+		t.Error("codex was not launched")
 	}
 }

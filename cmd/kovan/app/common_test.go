@@ -108,31 +108,6 @@ func TestTmuxEscape(t *testing.T) {
 	}
 }
 
-func TestAgentCommand(t *testing.T) {
-	// Fresh: --add-dir grants the task-doc dir, --session-id pins the transcript,
-	// "--" guards the positional prompt.
-	if got := agentCommand("claude", "fix the vfs handler", launchFresh, []string{"/notes"}, "sid-1"); got != `claude --add-dir '/notes' --session-id 'sid-1' -- 'fix the vfs handler'` {
-		t.Errorf("fresh = %q", got)
-	}
-	// Resume reattaches the tab's own conversation by id — tabs share a cwd, so
-	// --continue would grab a sibling's conversation (and no prompt).
-	if got := agentCommand("claude", "ignored on resume", launchResume, []string{"/notes"}, "sid-1"); got != "claude --add-dir '/notes' --resume 'sid-1'" {
-		t.Errorf("resume = %q", got)
-	}
-	// Resume without a recorded session id falls back to --continue.
-	if got := agentCommand("claude", "ignored on resume", launchResume, []string{"/notes"}, ""); got != "claude --add-dir '/notes' --continue" {
-		t.Errorf("resume without id = %q", got)
-	}
-	// Every dir gets its own flag: the task docs plus the agent's other workspaces.
-	if got := agentCommand("claude", "", launchResume, []string{"/notes", "/w/cloud-1"}, "sid-1"); got != "claude --add-dir '/notes' --add-dir '/w/cloud-1' --resume 'sid-1'" {
-		t.Errorf("two dirs = %q", got)
-	}
-	// No add-dir / no session id → just the guarded prompt.
-	if got := agentCommand("claude", "g", launchFresh, nil, ""); got != "claude -- 'g'" {
-		t.Errorf("minimal = %q", got)
-	}
-}
-
 func TestDecideOpen(t *testing.T) {
 	cases := []struct {
 		alive, worktreePresent bool

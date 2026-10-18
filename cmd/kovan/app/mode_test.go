@@ -23,24 +23,6 @@ func TestMapMode(t *testing.T) {
 	}
 }
 
-func TestLastPermissionMode(t *testing.T) {
-	data := []byte(`{"type":"user","permissionMode":"default"}
-{"type":"assistant","permissionMode":"acceptEdits"}
-{"type":"user","msg":"no mode here"}
-`)
-	if got, ok := lastPermissionMode(data); !ok || got != "acceptEdits" {
-		t.Errorf("lastPermissionMode = (%q,%v), want acceptEdits", got, ok)
-	}
-	// A null value is not a match; fall back to the prior string value.
-	withNull := append(data, []byte(`{"permissionMode":null}`+"\n")...)
-	if got, ok := lastPermissionMode(withNull); !ok || got != "acceptEdits" {
-		t.Errorf("with trailing null = (%q,%v), want acceptEdits", got, ok)
-	}
-	if _, ok := lastPermissionMode([]byte(`{"type":"user"}`)); ok {
-		t.Error("no permissionMode should not match")
-	}
-}
-
 func TestPermMode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -85,7 +67,7 @@ func TestTranscriptModeCachedPath(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"permissionMode":"acceptEdits"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := transcriptMode(sid); !ok || got != "acceptEdits" {
+	if got, ok := convoOf("", "", sid).perm(); !ok || got != "acceptEdits" {
 		t.Fatalf("first resolve = (%q,%v), want acceptEdits", got, ok)
 	}
 
@@ -93,7 +75,7 @@ func TestTranscriptModeCachedPath(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"permissionMode":"plan"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := transcriptMode(sid); !ok || got != "plan" {
+	if got, ok := convoOf("", "", sid).perm(); !ok || got != "plan" {
 		t.Errorf("cached-path read = (%q,%v), want plan", got, ok)
 	}
 
@@ -109,7 +91,7 @@ func TestTranscriptModeCachedPath(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := transcriptMode(sid); !ok || got != "default" {
+	if got, ok := convoOf("", "", sid).perm(); !ok || got != "default" {
 		t.Errorf("after move = (%q,%v), want default via re-resolve", got, ok)
 	}
 
@@ -117,7 +99,7 @@ func TestTranscriptModeCachedPath(t *testing.T) {
 	if err := os.Remove(moved); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := transcriptMode(sid); ok {
+	if _, ok := convoOf("", "", sid).perm(); ok {
 		t.Error("removed transcript should not resolve")
 	}
 }

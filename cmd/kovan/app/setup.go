@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
+	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/spf13/cobra"
 )
 
-// gateHookEvents are the Claude Code events kovan observes to keep the board live.
-var gateHookEvents = []string{"PreToolUse", "PostToolUse", "UserPromptSubmit", "Notification", "Stop"}
-
-// gateRunCommand is the hook command: the absolute path of the running kovan
-// binary plus "gate run". The absolute path is required because hooks run under
-// /bin/sh, where kovan is usually not on PATH.
-func gateRunCommand() (string, error) {
+// gateRunCommand is the hook command for driver d: the absolute path of the
+// running kovan binary plus "gate run", naming the CLI whose payload the hook
+// decodes (claude, the default, stays unnamed). The absolute path is required
+// because hooks run under /bin/sh, where kovan is usually not on PATH.
+func gateRunCommand(d agent.Driver) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -24,7 +25,11 @@ func gateRunCommand() (string, error) {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	return quoteArg(exe) + " gate run", nil
+	cmd := quoteArg(exe) + " gate run"
+	if d.Name() != agent.Claude {
+		cmd += " --agent " + d.Name()
+	}
+	return cmd, nil
 }
 
 // quoteArg double-quotes a path only when it contains spaces, leaving the common
@@ -40,53 +45,93 @@ var setupSettings string
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Install kovan's Claude Code hooks (run once per machine)",
-	Long: `Install the global hooks that keep the board live: as Claude Code runs, each
-agent's state and mode are written to its manifest. Idempotent and safe — it
-backs up settings.json and preserves everything else.`,
+	Short: "Install kovan's hooks into each agent CLI (run once per machine)",
+	Long: `Install the global hooks that keep the board live: as an agent runs, its
+state and mode are written to its manifest, and the gates check its tool calls.
+Claude Code's hooks go into ~/.claude/settings.json; Codex's into hooks.json in
+~/.codex and in every Codex account's home. Idempotent and safe: it backs up
+each file and preserves everything else.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := setupSettings
-		if path == "" {
-			p, err := settingsPath()
-			if err != nil {
-				return err
-			}
-			path = p
-		}
-		added, err := installHooks(path)
+		global, err := config.LoadGlobal()
 		if err != nil {
 			return err
 		}
-		if len(added) == 0 {
-			fmt.Println("kovan hooks already installed; nothing to add.")
-			return nil
+		targets := hookTargets(global)
+		if setupSettings != "" {
+			targets[0].path = setupSettings
 		}
-		fmt.Printf("Wired kovan hooks into %s (%d events).\n", path, len(added))
-		fmt.Println("hooks installed — spawn a fresh agent (kovan start …) to see live mode/state on the board.")
+		for _, t := range targets {
+			added, err := installHooks(t.path, t.d)
+			if err != nil {
+				return err
+			}
+			if len(added) == 0 {
+				fmt.Printf("%s: kovan hooks already installed in %s.\n", t.d.Name(), t.path)
+				continue
+			}
+			fmt.Printf("%s: wired kovan hooks into %s (%d events).\n", t.d.Name(), t.path, len(added))
+			if t.d.Name() == agent.Codex {
+				fmt.Println("  Codex runs a new hook only once you trust it: open codex with this home and approve kovan's hook in /hooks.")
+			}
+		}
 		return nil
 	},
 }
 
 func init() {
-	setupCmd.Flags().StringVar(&setupSettings, "settings", "", "settings.json path (default ~/.claude/settings.json)")
+	setupCmd.Flags().StringVar(&setupSettings, "settings", "", "Claude Code settings.json path (default ~/.claude/settings.json)")
 }
 
-// settingsPath is the default Claude Code settings file, ~/.claude/settings.json.
-func settingsPath() (string, error) {
-	claude, err := claudeDir()
-	if err != nil {
-		return "", err
+// hookTarget is one hooks file kovan installs into.
+type hookTarget struct {
+	d    agent.Driver
+	path string
+}
+
+// hookTargets lists every hooks file kovan installs into: Claude Code's
+// settings first, always; then each other CLI that is installed or has an
+// account, in its default home and in every home an account gives it.
+func hookTargets(global *config.Global) []hookTarget {
+	claude := mustDriver(agent.Claude)
+	targets := []hookTarget{{claude, claude.HooksFile(claude.DefaultHome())}}
+	for _, name := range agent.Names() {
+		d := mustDriver(name)
+		if name == agent.Claude || d.HomeEnv() == "" {
+			continue
+		}
+		homes := map[string]bool{}
+		for _, acct := range global.Accounts {
+			if acct.Agent == name && acct.Home != "" {
+				homes[acct.Home] = true
+			}
+		}
+		if len(homes) == 0 && !installed(global, name) {
+			continue
+		}
+		homes[d.DefaultHome()] = true
+		for _, h := range sortedKeys(homes) {
+			targets = append(targets, hookTarget{d, d.HooksFile(h)})
+		}
 	}
-	return filepath.Join(claude, "settings.json"), nil
+	return targets
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // installHooks merges the kovan hook entries into the settings file, preserving
 // every existing key and hook. It is idempotent, re-points an existing kovan
 // hook whose binary path changed, and backs the file up before writing. It
 // returns the events it added or re-pointed (empty when already correct).
-func installHooks(path string) ([]string, error) {
-	command, err := gateRunCommand()
+func installHooks(path string, d agent.Driver) ([]string, error) {
+	command, err := gateRunCommand(d)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +153,7 @@ func installHooks(path string) ([]string, error) {
 	}
 
 	var changed []string
-	for _, ev := range gateHookEvents {
+	for _, ev := range d.HookEvents() {
 		groups, err := asArray(hooks[ev])
 		if err != nil {
 			return nil, fmt.Errorf("hooks.%s: %w", ev, err)
@@ -158,10 +203,11 @@ func asArray(v any) ([]any, error) {
 	return s, nil
 }
 
-// isGateRun reports whether cmd is a kovan gate-run hook, matched by suffix so a
-// re-pointed binary path is recognized as the same hook rather than a new one.
+// isGateRun reports whether cmd is a kovan gate-run hook, matched on the
+// subcommand rather than the whole line so a re-pointed binary path is
+// recognized as the same hook rather than a new one.
 func isGateRun(cmd string) bool {
-	return strings.HasSuffix(cmd, "gate run")
+	return strings.HasSuffix(cmd, " gate run") || strings.Contains(cmd, " gate run --agent ")
 }
 
 // ensureGateRun guarantees groups holds the desired kovan hook: it re-points an

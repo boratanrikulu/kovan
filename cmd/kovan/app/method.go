@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/boratanrikulu/kovan/internal/agent"
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/method"
 	"github.com/boratanrikulu/kovan/internal/mode"
@@ -59,6 +61,19 @@ var methodLinkCmd = &cobra.Command{
 		}
 		if len(skills) > 0 {
 			fmt.Printf("Linked %d global skill(s) into %s.\n", len(skills), filepath.Join(filepath.Dir(path), "skills"))
+		}
+		// The other agent CLIs get the method composed at launch, but scan their
+		// own dir for skills.
+		for _, name := range agent.Names() {
+			if name == agent.Claude {
+				continue
+			}
+			dir := mustDriver(name).GlobalSkillsDir()
+			if skills, err := linkGlobalSkills(home, dir); err != nil {
+				return err
+			} else if len(skills) > 0 {
+				fmt.Printf("Linked %d global skill(s) into %s for %s.\n", len(skills), dir, name)
+			}
 		}
 		return nil
 	},
@@ -245,4 +260,13 @@ var methodEditCmd = &cobra.Command{
 func init() {
 	methodLinkCmd.Flags().StringVar(&methodLinkClaudeMd, "claude-md", "", "path to CLAUDE.md (default ~/.claude/CLAUDE.md)")
 	methodCmd.AddCommand(methodLinkCmd, methodShowCmd, methodEditCmd)
+}
+
+// importLines renders one Claude Code @import line per file (absolute paths).
+func importLines(files []string) string {
+	lines := make([]string, len(files))
+	for i, f := range files {
+		lines[i] = "@" + f
+	}
+	return strings.Join(lines, "\n")
 }

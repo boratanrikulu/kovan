@@ -58,6 +58,10 @@ Keyed by the repo name (the checkout's basename).
 | `color` | (none) | default board stripe color for this repo's agents |
 | `write_paths` | (none) | extra allowed write prefixes for this repo's scoped modes (adds to the mode's own list) |
 
+The worktree keys also apply when an agent from another repo adds a worktree
+here with `kovan worktree add <repo>`: it gets `<prefix>-<agent id>` on this
+repo's branch template and base, and this repo's `.kovan/setup.sh` runs on it.
+
 ## Checking your config
 
 Templates are scaffolded once and never touched again, so a config written
@@ -181,11 +185,12 @@ smells like a mutation asks.
 
 `read_only` and `write_paths` enforce a mode's posture, declared in its
 `mode.yaml`, see [Modes](#modes). Two things about them are worth knowing.
-They only apply **inside the agent's worktree**, so writes to the task-doc
-store (brief, spec, learnings) always pass and a read-only agent can still
-produce its artifact. And they fail open: a relative path, an empty path, or
-anything outside the worktree is not gated, because a gate that guesses is
-worse than one that stays quiet.
+They only apply **inside the agent's worktrees** (its primary one and any it
+added with `kovan worktree add`, each scoped by its own repo's `write_paths`),
+so writes to the task-doc store (brief, spec, learnings) always pass and a
+read-only agent can still produce its artifact. And they fail open: a relative
+path, an empty path, or anything outside the agent's worktrees is not gated,
+because a gate that guesses is worse than one that stays quiet.
 
 ### Your own gates
 
@@ -374,4 +379,5 @@ carve-outs for scoped modes with `write_paths:` in its
 Options under `tmux.options` are applied per agent session, so your
 `~/.tmux.conf` stays untouched. kovan also gives each session a status bar
 (the kovan chip, the agent id, repo, branch, title) and binds `prefix k` to
-the editor/merge/terminal/notes menu inside any agent session.
+the editor/merge/terminal/notes menu inside any agent session. An agent with
+worktrees in several repos gets each app per repo in that menu.

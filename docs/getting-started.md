@@ -131,7 +131,9 @@ The keys that matter:
 The mouse works everywhere it should: hover selects, the wheel scrolls the
 list or the peek, clicking the header switches active/archived, clicks focus
 form fields and pick options. Inside an agent's tmux session, `prefix k`
-opens the same editor/merge/terminal/notes menu.
+opens the same editor/merge/terminal/notes menu. An agent told to work in a
+second repo runs `kovan worktree add <repo>`, and both the menu and the board
+keys then offer each of its worktrees.
 
 ## The daily loop
 

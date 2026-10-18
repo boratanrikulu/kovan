@@ -139,3 +139,96 @@ func TestNotesDirForErrors(t *testing.T) {
 		t.Errorf("missing task docs error = %v, want a 'no task docs' message", err)
 	}
 }
+
+func TestWorktreeFromExtraWorkspace(t *testing.T) {
+	t.Setenv("KOVAN_HOME", t.TempDir())
+	primary, extra := t.TempDir(), t.TempDir()
+	m := &session.Manifest{ID: "aa", Repo: "agent", Tmux: "kovan-agent-aa", Worktree: primary,
+		Extra: []session.Workspace{{Repo: "cloud", Worktree: extra}}}
+	if err := m.Write(); err != nil {
+		t.Fatal(err)
+	}
+	// An app opened on a path in the agent's cloud worktree opens that worktree,
+	// not the agent's primary one.
+	if got := worktreeFrom(filepath.Join(extra, "web")); got != extra {
+		t.Errorf("worktreeFrom(extra/web) = %q, want %q", got, extra)
+	}
+	if got := worktreeFrom(filepath.Join(primary, "pkg")); got != primary {
+		t.Errorf("worktreeFrom(primary/pkg) = %q, want %q", got, primary)
+	}
+}
+
+func TestAppMenuArgsSingleWorkspace(t *testing.T) {
+	m := &session.Manifest{ID: "aa", Repo: "agent", Tmux: "kovan-agent-aa", Worktree: "/w/agent-aa"}
+	got := strings.Join(appMenuArgs(m, "/dev/ttys001", "%3"), "\n")
+	for _, want := range []string{
+		"-c\n/dev/ttys001",
+		"editor\ne\nrun-shell \"kovan app editor --session 'kovan-agent-aa' --workspace 0\"",
+		"merge\ns\n",
+		"terminal\nt\n",
+		"notes\nw\nrun-shell \"kovan app notes --session 'kovan-agent-aa'\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("menu args missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "/w/agent-aa") {
+		t.Errorf("a path must never reach a menu command (tmux expands it as a format):\n%s", got)
+	}
+}
+
+func TestAppMenuArgsExtraWorkspaces(t *testing.T) {
+	m := &session.Manifest{ID: "aa", Repo: "agent", Tmux: "kovan-agent-aa", Worktree: "/w/agent-aa",
+		Extra: []session.Workspace{{Repo: "cloud", Worktree: "/w/cloud-aa"}, {Repo: "docs#1", Worktree: "/w/docs-aa"}}}
+	got := strings.Join(appMenuArgs(m, "c", "%3"), "\n")
+	for _, want := range []string{
+		"editor · agent\ne\nrun-shell \"kovan app editor --session 'kovan-agent-aa' --workspace 0\"",
+		"editor · cloud\nE\nrun-shell \"kovan app editor --session 'kovan-agent-aa' --workspace 1\"",
+		"terminal · cloud\nT\n",
+		"merge · docs##1\n\nrun-shell \"kovan app merge --session 'kovan-agent-aa' --workspace 2\"",
+		"notes\nw\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("menu args missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "notes\n") != 1 {
+		t.Errorf("notes is per agent, not per repo; want one item:\n%s", got)
+	}
+}
+
+func TestAppTargetByWorkspaceIndex(t *testing.T) {
+	t.Setenv("KOVAN_HOME", t.TempDir())
+	m := &session.Manifest{ID: "aa", Repo: "agent", Tmux: "kovan-agent-aa", Worktree: "/w/agent-aa",
+		Extra: []session.Workspace{{Repo: "cloud", Worktree: "/w/cloud-aa"}}}
+	if err := m.Write(); err != nil {
+		t.Fatal(err)
+	}
+	appSession, appWorkspace = "kovan-agent-aa", 1
+	t.Cleanup(func() { appSession, appWorkspace = "", -1 })
+	if got, err := appTarget([]string{"editor"}); err != nil || got != "/w/cloud-aa" {
+		t.Errorf("appTarget = %q, %v; want the cloud worktree", got, err)
+	}
+	appWorkspace = 2
+	if _, err := appTarget([]string{"editor"}); err == nil {
+		t.Error("an index past the workspaces should error")
+	}
+}
+
+func TestTmuxCommandArgEscapes(t *testing.T) {
+	// tmux expands $VAR and \ inside double quotes, and a menu command is
+	// expanded as a format twice (when the item is chosen, then by run-shell),
+	// so a path carrying them must reach the shell literally.
+	got := tmuxShellCommand(`kovan app editor '/w/a"$HOME\#1'`)
+	want := `run-shell "kovan app editor '/w/a\"\$HOME\\####1'"`
+	if got != want {
+		t.Errorf("tmuxShellCommand = %s, want %s", got, want)
+	}
+}
+
+func TestAppMenuArgsOutsideAgent(t *testing.T) {
+	got := strings.Join(appMenuArgs(&session.Manifest{}, "c", "%3"), "\n")
+	if !strings.Contains(got, "kovan app editor --pane '%3'") || strings.Contains(got, "notes") {
+		t.Errorf("a non-agent pane gets the worktree apps and no notes:\n%s", got)
+	}
+}

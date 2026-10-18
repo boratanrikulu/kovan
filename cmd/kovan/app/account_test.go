@@ -60,15 +60,15 @@ func TestAccountTokenFile(t *testing.T) {
 }
 
 func TestLaunchCommand(t *testing.T) {
-	if got := launchCommand("claude", "fix vfs", launchFresh, "", nil, "/notes", "sid"); got != "claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'" {
+	if got := launchCommand("claude", "fix vfs", launchFresh, "", nil, []string{"/notes"}, "sid"); got != "claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'" {
 		t.Errorf("no account = %q", got)
 	}
-	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", nil, "/notes", "sid")
+	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", nil, []string{"/notes"}, "sid")
 	want := `CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'`
 	if got != want {
 		t.Errorf("with account = %q, want %q", got, want)
 	}
-	if got := launchCommand("claude", "ignored", launchResume, "/x/tok", nil, "/notes", "sid"); !strings.HasSuffix(got, "claude --add-dir '/notes' --resume 'sid'") {
+	if got := launchCommand("claude", "ignored", launchResume, "/x/tok", nil, []string{"/notes"}, "sid"); !strings.HasSuffix(got, "claude --add-dir '/notes' --resume 'sid'") {
 		t.Errorf("resume = %q", got)
 	}
 	// The token value itself must never appear — only the path.
@@ -152,14 +152,14 @@ func TestLaunchCommandAccountEnv(t *testing.T) {
 		"ZZ_LAST":                      "1",
 		"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]",
 	}
-	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", env, "/notes", "sid")
+	got := launchCommand("claude", "fix vfs", launchFresh, "/x/tok", env, []string{"/notes"}, "sid")
 	want := `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5[1m]' ZZ_LAST='1' ` +
 		`CLAUDE_CODE_OAUTH_TOKEN="$(cat '/x/tok')" claude --add-dir '/notes' --session-id 'sid' -- 'fix vfs'`
 	if got != want {
 		t.Errorf("account env =\n%q\nwant\n%q", got, want)
 	}
 	// Env without an account still applies; no token is injected.
-	solo := launchCommand("claude", "g", launchFresh, "", env, "/notes", "sid")
+	solo := launchCommand("claude", "g", launchFresh, "", env, []string{"/notes"}, "sid")
 	if strings.Contains(solo, oauthEnvKey) {
 		t.Errorf("no token file should inject no token env, got %q", solo)
 	}

@@ -124,7 +124,7 @@ func TestWriteClaudeLocal(t *testing.T) {
 	t.Setenv("KOVAN_HOME", t.TempDir()) // no method layers → just the brief pointer
 	wt := t.TempDir()
 	taskAbs := filepath.Join("/notes", "TASK-1")
-	if err := writeClaudeLocal(wt, "TASK-1", "fix vfs", taskAbs, "", "", "kovan", &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}); err != nil {
+	if err := writeClaudeLocal(wt, "TASK-1", "fix vfs", taskAbs, "", "", "kovan", &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(wt, "CLAUDE.local.md")
@@ -137,7 +137,7 @@ func TestWriteClaudeLocal(t *testing.T) {
 	}
 
 	// A second write (e.g. re-run) keeps a single managed block.
-	if err := writeClaudeLocal(wt, "TASK-1", "fix vfs v2", taskAbs, "", "", "kovan", &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}); err != nil {
+	if err := writeClaudeLocal(wt, "TASK-1", "fix vfs v2", taskAbs, "", "", "kovan", &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = os.ReadFile(path)
@@ -165,7 +165,7 @@ func TestWriteClaudeLocalMethod(t *testing.T) {
 
 	wt := t.TempDir()
 	taskAbs := filepath.Join(home, "projects", "kovan", "works", "TASK-1")
-	if err := writeClaudeLocal(wt, "TASK-1", "fix vfs", taskAbs, "personal", "", "kovan", &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}); err != nil {
+	if err := writeClaudeLocal(wt, "TASK-1", "fix vfs", taskAbs, "personal", "", "kovan", &mode.Mode{Name: "code", Posture: "edit", Docs: []string{"spec.md"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(wt, "CLAUDE.local.md"))
@@ -188,7 +188,7 @@ func TestWriteClaudeLocalModeMethod(t *testing.T) {
 	}
 	wt := t.TempDir()
 	taskAbs := filepath.Join("/notes", "TASK-1")
-	if err := writeClaudeLocal(wt, "TASK-1", "review pr", taskAbs, "", "", "kovan", rev); err != nil {
+	if err := writeClaudeLocal(wt, "TASK-1", "review pr", taskAbs, "", "", "kovan", rev, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(wt, "CLAUDE.local.md"))

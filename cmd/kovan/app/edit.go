@@ -60,7 +60,7 @@ func editAgent(tmux, title, modeFlag, account, color string) (id string, err err
 	if err := taskdoc.Scaffold(taskAbs, man.ID, title, repoCfg.Task.Token, templatesDir(), taskMode.Docs); err != nil {
 		return "", err
 	}
-	if err := writeClaudeLocal(man.Worktree, man.ID, title, taskAbs, account, repoCfg.Domain, man.Repo, taskMode); err != nil {
+	if err := renderClaudeLocal(man); err != nil {
 		return "", err
 	}
 	return man.ID, nil

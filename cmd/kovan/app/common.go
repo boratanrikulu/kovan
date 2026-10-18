@@ -27,13 +27,14 @@ const (
 )
 
 // agentCommand builds the shell command that launches the agent. Both forms
-// live here so that swapping the agent tool stays a single-site change. addDir
-// grants the agent access to its task docs (which live outside the worktree); a
-// "--" guards the positional prompt from the variadic --add-dir flag.
-func agentCommand(agent, prompt string, mode launchMode, addDir, sessionID string) string {
+// live here so that swapping the agent tool stays a single-site change. addDirs
+// grants the agent access to dirs outside its cwd (the task docs, its other
+// workspaces); a "--" guards the positional prompt from the variadic --add-dir
+// flag.
+func agentCommand(agent, prompt string, mode launchMode, addDirs []string, sessionID string) string {
 	add := ""
-	if addDir != "" {
-		add = " --add-dir " + shellQuote(addDir)
+	for _, d := range addDirs {
+		add += " --add-dir " + shellQuote(d)
 	}
 	// Resume targets the tab's own conversation by id: --continue picks the most
 	// recent conversation in the cwd, which is a sibling's when tabs share a
@@ -53,8 +54,9 @@ func agentCommand(agent, prompt string, mode launchMode, addDir, sessionID strin
 
 // runnerSession builds the detached session that launches the agent, applying
 // the user's tmux options and the manifest's account token, and granting access
-// to the agent's durable task-doc dir. prompt is the fresh-start opening prompt;
-// it is ignored on the wake/resume path.
+// to the agent's durable task-doc dir and its other workspaces. prompt is the
+// fresh-start opening prompt; it is ignored on the wake/resume path.
+// KOVAN_SESSION names the tab, so kovan commands the agent runs resolve it.
 func runnerSession(m *session.Manifest, mode launchMode, prompt string) (runner.Session, error) {
 	global, err := config.LoadGlobal()
 	if err != nil {
@@ -70,11 +72,16 @@ func runnerSession(m *session.Manifest, mode launchMode, prompt string) (runner.
 	}
 	// kovan's branding goes last so it wins over any user status options.
 	opts := append(append([]string{}, global.Tmux.Options...), statusBarOptions(m)...)
+	dirs := []string{notes}
+	for _, w := range m.Extra {
+		dirs = append(dirs, w.Worktree)
+	}
 	return runner.Session{
 		Name:    m.Tmux,
 		Title:   fmt.Sprintf("%s: %s", m.ID, m.Title), // tmux window + terminal tab
 		Dir:     m.Worktree,
-		Cmd:     launchCommand(m.Agent, prompt, mode, tokenFile, accountEnv(global, m.Account), notes, m.SessionID),
+		Cmd:     launchCommand(m.Agent, prompt, mode, tokenFile, accountEnv(global, m.Account), dirs, m.SessionID),
+		Env:     []string{sessionEnv + "=" + m.Tmux},
 		Options: opts,
 	}, nil
 }

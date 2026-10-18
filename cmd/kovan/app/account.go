@@ -110,8 +110,8 @@ func envPrefix(env map[string]string) string {
 
 // launchCommand builds the agent command, prefixing the account's extra
 // environment and the OAuth token env read from tokenFile when one is in play.
-func launchCommand(agent, prompt string, mode launchMode, tokenFile string, env map[string]string, addDir, sessionID string) string {
-	cmd := agentCommand(agent, prompt, mode, addDir, sessionID)
+func launchCommand(agent, prompt string, mode launchMode, tokenFile string, env map[string]string, addDirs []string, sessionID string) string {
+	cmd := agentCommand(agent, prompt, mode, addDirs, sessionID)
 	if tokenFile != "" {
 		cmd = oauthEnvKey + "=" + tokenReadExpr(tokenFile) + " " + cmd
 	}

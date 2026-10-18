@@ -23,13 +23,28 @@ type boardRow struct {
 	Branch    string
 	Title     string
 	Tmux      string
-	Worktree  string    // worktree root, for board apps (editor/git GUI); not rendered
-	Cont      bool      // a sibling tab sharing the row above's worktree (a workspace continuation)
-	SessionID string    // Claude session id; locates the transcript the summarizer digests
-	Summary   string    // last persisted monitor summary, seeds the cockpit's cache
-	SummaryAt time.Time // when that summary was generated
-	Pinned    bool      // kept at the top of the board
-	Color     string    // the row's stripe color, a palette name
+	Worktree  string              // worktree root, for board apps (editor/git GUI); not rendered
+	Cont      bool                // a sibling tab sharing the row above's worktree (a workspace continuation)
+	SessionID string              // Claude session id; locates the transcript the summarizer digests
+	Summary   string              // last persisted monitor summary, seeds the cockpit's cache
+	SummaryAt time.Time           // when that summary was generated
+	Pinned    bool                // kept at the top of the board
+	Color     string              // the row's stripe color, a palette name
+	Extra     []session.Workspace // the agent's worktrees in other repos
+}
+
+// workspaces lists the row's worktrees as repo + path, the primary first.
+func (r boardRow) workspaces() []session.Workspace {
+	return append([]session.Workspace{{Repo: r.Repo, Worktree: r.Worktree}}, r.Extra...)
+}
+
+// repoCell is the REPO column: the primary repo, plus a count of the others an
+// agent works in.
+func repoCell(r boardRow) string {
+	if len(r.Extra) == 0 {
+		return r.Repo
+	}
+	return fmt.Sprintf("%s+%d", r.Repo, len(r.Extra))
 }
 
 // loadBoard reads every agent's manifest and resolves its live state.
@@ -102,6 +117,7 @@ func assembleBoard(manifests []*session.Manifest, alive func(name string) bool) 
 			Color:     m.Color,
 			Summary:   m.Summary,
 			SummaryAt: m.SummaryAt,
+			Extra:     m.Extra,
 		})
 	}
 	return rows
@@ -175,6 +191,11 @@ func filterRows(rows []boardRow, query string, archivedOnly bool) []boardRow {
 func rowMatches(r boardRow, q string) bool {
 	for _, f := range []string{r.State, r.Mode, r.Account, r.ID, r.Repo, r.Branch, r.Title} {
 		if strings.Contains(strings.ToLower(f), q) {
+			return true
+		}
+	}
+	for _, w := range r.Extra {
+		if strings.Contains(strings.ToLower(w.Repo), q) {
 			return true
 		}
 	}

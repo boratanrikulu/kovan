@@ -153,6 +153,14 @@ func (r *Repo) WorktreeRemove(path string, force bool) error {
 	return nil
 }
 
+// WorktreePrune drops git's records of worktrees whose dirs are gone.
+func (r *Repo) WorktreePrune() error {
+	if _, err := r.git("worktree", "prune"); err != nil {
+		return fmt.Errorf("git worktree prune: %w", err)
+	}
+	return nil
+}
+
 // Worktree is one entry from `git worktree list`.
 type Worktree struct {
 	Path   string

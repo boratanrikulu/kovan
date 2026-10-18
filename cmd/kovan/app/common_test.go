@@ -58,6 +58,22 @@ func TestRunnerSessionPassesSessionID(t *testing.T) {
 	}
 }
 
+func TestRunnerSessionExtraWorkspaces(t *testing.T) {
+	t.Setenv("KOVAN_HOME", t.TempDir())
+	m := &session.Manifest{Tmux: "kovan-agent-1", Worktree: "/wt", Agent: "claude", Title: "g", SessionID: "sid",
+		Extra: []session.Workspace{{Repo: "cloud", Worktree: "/w/cloud-1"}}}
+	sess, err := runnerSession(m, launchResume, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sess.Cmd, "--add-dir '/w/cloud-1'") {
+		t.Errorf("wake must grant the extra workspace: %q", sess.Cmd)
+	}
+	if len(sess.Env) != 1 || sess.Env[0] != "KOVAN_SESSION=kovan-agent-1" {
+		t.Errorf("env = %v, want the tab's tmux name as KOVAN_SESSION", sess.Env)
+	}
+}
+
 func TestRunnerSessionWindowTitle(t *testing.T) {
 	t.Setenv("KOVAN_HOME", t.TempDir())
 	m := &session.Manifest{Tmux: "t", Worktree: "/wt", Agent: "claude", ID: "TASK-1", Title: "fix vfs"}
@@ -95,20 +111,24 @@ func TestTmuxEscape(t *testing.T) {
 func TestAgentCommand(t *testing.T) {
 	// Fresh: --add-dir grants the task-doc dir, --session-id pins the transcript,
 	// "--" guards the positional prompt.
-	if got := agentCommand("claude", "fix the vfs handler", launchFresh, "/notes", "sid-1"); got != `claude --add-dir '/notes' --session-id 'sid-1' -- 'fix the vfs handler'` {
+	if got := agentCommand("claude", "fix the vfs handler", launchFresh, []string{"/notes"}, "sid-1"); got != `claude --add-dir '/notes' --session-id 'sid-1' -- 'fix the vfs handler'` {
 		t.Errorf("fresh = %q", got)
 	}
 	// Resume reattaches the tab's own conversation by id — tabs share a cwd, so
 	// --continue would grab a sibling's conversation (and no prompt).
-	if got := agentCommand("claude", "ignored on resume", launchResume, "/notes", "sid-1"); got != "claude --add-dir '/notes' --resume 'sid-1'" {
+	if got := agentCommand("claude", "ignored on resume", launchResume, []string{"/notes"}, "sid-1"); got != "claude --add-dir '/notes' --resume 'sid-1'" {
 		t.Errorf("resume = %q", got)
 	}
 	// Resume without a recorded session id falls back to --continue.
-	if got := agentCommand("claude", "ignored on resume", launchResume, "/notes", ""); got != "claude --add-dir '/notes' --continue" {
+	if got := agentCommand("claude", "ignored on resume", launchResume, []string{"/notes"}, ""); got != "claude --add-dir '/notes' --continue" {
 		t.Errorf("resume without id = %q", got)
 	}
+	// Every dir gets its own flag: the task docs plus the agent's other workspaces.
+	if got := agentCommand("claude", "", launchResume, []string{"/notes", "/w/cloud-1"}, "sid-1"); got != "claude --add-dir '/notes' --add-dir '/w/cloud-1' --resume 'sid-1'" {
+		t.Errorf("two dirs = %q", got)
+	}
 	// No add-dir / no session id → just the guarded prompt.
-	if got := agentCommand("claude", "g", launchFresh, "", ""); got != "claude -- 'g'" {
+	if got := agentCommand("claude", "g", launchFresh, nil, ""); got != "claude -- 'g'" {
 		t.Errorf("minimal = %q", got)
 	}
 }

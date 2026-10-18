@@ -284,34 +284,12 @@ func scaffoldAgent(repoRoot, id, title, from, account, modeFlag, color string, i
 			}
 		}()
 	default:
-		base = from
-		if base == "" {
-			base = repoCfg.Worktree.Base
+		wt, werr := makeWorktree(repo, repoCfg, global, id, title, from, "",
+			fmt.Sprintf("use `kovan remove %s` first", id), "pick another id")
+		if werr != nil {
+			return nil, werr
 		}
-		if base == "" {
-			if base, err = repo.DefaultBase(); err != nil {
-				return nil, err
-			}
-		}
-		wtPath = worktreePath(repo.Root, repoCfg.Worktree.Prefix, id)
-		if _, err := os.Stat(wtPath); err == nil {
-			return nil, fmt.Errorf("worktree already exists at %s (use `kovan remove %s` first)", wtPath, id)
-		}
-		branch = renderBranch(repoCfg.Worktree.BranchTemplate, resolveAuthor(global, repo), id, slugify(title))
-		reuse = repo.BranchExists(branch) || repo.RemoteBranchExists(branch)
-		// Fork a fresh branch off the latest pushed base, not a stale local ref.
-		// Best-effort: offline or a flaky remote falls back to the local base.
-		forkRef := base
-		if !reuse {
-			if ref, ferr := repo.FetchBase(base); ferr != nil {
-				fmt.Fprintf(os.Stderr, "kovan: fetch %s: %v (using local %s)\n", base, ferr, base)
-			} else {
-				forkRef = ref
-			}
-		}
-		if err := repo.WorktreeAdd(wtPath, branch, forkRef, !reuse); err != nil {
-			return nil, err
-		}
+		wtPath, branch, base, reuse = wt.path, wt.branch, wt.base, wt.reused
 		// The worktree now exists; undo it if any later step fails.
 		defer func() {
 			if err != nil {
@@ -509,7 +487,7 @@ func launchScaffolded(spec *agentSpec, quick bool) (res startResult, err error) 
 	// the shared file alone (it belongs to the worktree's first tab) and is briefed
 	// through its opening prompt and task-doc dir instead.
 	if !quick && !spec.tab {
-		if err := writeClaudeLocal(m.Worktree, m.ID, m.Title, spec.taskAbs, m.Account, spec.domain, m.Repo, spec.mode); err != nil {
+		if err := writeClaudeLocal(m.Worktree, m.ID, m.Title, spec.taskAbs, m.Account, spec.domain, m.Repo, spec.mode, m.Extra); err != nil {
 			return res, err
 		}
 	}

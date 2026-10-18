@@ -12,9 +12,11 @@ import (
 type Tmux struct{}
 
 // SessionName sanitizes raw into a name tmux accepts: tmux treats '.' and ':'
-// specially in target names, so they are replaced with '-'.
+// specially in target names, so they are replaced with '-'. So are the
+// characters that are special in tmux formats, shell quotes and paths, since
+// the name is passed through menu commands and names the manifest file.
 func SessionName(raw string) string {
-	return strings.NewReplacer(".", "-", ":", "-", " ", "-").Replace(raw)
+	return strings.NewReplacer(".", "-", ":", "-", " ", "-", "#", "-", "'", "-", `"`, "-", "$", "-", `\`, "-", "`", "-", "/", "-").Replace(raw)
 }
 
 // Start launches the session detached via `tmux new-session -d`.
@@ -43,27 +45,18 @@ func (Tmux) Start(s Session) error {
 	return nil
 }
 
-// applyAppMenuBinding binds "prefix k" to a tmux menu that opens the configured
-// apps (editor / merge / terminal on the worktree, or "notes" — the editor on
-// the agent's task-doc dir) for the agent in the current pane, so they're
-// reachable from inside an agent's session — where the board's e/s/t/w keys
-// aren't. Notes passes the session name (not just the pane path), since the
-// task-doc dir is keyed per tab. Like the scroll bindings it lives in the
-// server-global key table (no per-session binding exists); it uses the unbound
-// "prefix k" so it doesn't clobber tmux's default prefix keys. Best-effort.
+// applyAppMenuBinding binds "prefix k" to the kovan app menu (editor / merge /
+// terminal on each of the agent's worktrees, and "notes", the editor on its
+// task-doc dir), so the apps are reachable from inside an agent's session,
+// where the board's e/s/t/w keys aren't. kovan builds the menu itself from the
+// session's manifest, since an agent can have worktrees in several repos and
+// the pane's path only ever names the primary one. Like the scroll bindings it
+// lives in the server-global key table (no per-session binding exists); it uses
+// the unbound "prefix k" so it doesn't clobber tmux's default prefix keys.
+// Best-effort.
 func applyAppMenuBinding() {
-	item := func(kind string) string {
-		return fmt.Sprintf("run-shell \"kovan app %s '#{pane_current_path}'\"", kind)
-	}
-	notesItem := "run-shell \"kovan app notes --session '#{session_name}' '#{pane_current_path}'\""
-	args := []string{
-		"bind-key", "k", "display-menu", "-T", "kovan apps",
-		"editor", "e", item("editor"),
-		"merge", "s", item("merge"),
-		"terminal", "t", item("terminal"),
-		"notes", "w", notesItem,
-	}
-	if out, err := exec.Command("tmux", args...).CombinedOutput(); err != nil {
+	cmd := "run-shell \"kovan app menu --session #{q:session_name} --client #{q:client_name} --pane #{q:pane_id}\""
+	if out, err := exec.Command("tmux", "bind-key", "k", cmd).CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "kovan: tmux bind app menu: %s\n", strings.TrimSpace(string(out)))
 	}
 }

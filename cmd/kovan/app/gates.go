@@ -28,7 +28,7 @@ type gateInput struct {
 	command    string   // Bash command
 	filePath   string   // Edit/Write target
 	readOnly   bool     // the agent's mode is read-only
-	worktree   string   // the agent's worktree root, to scope the posture gates
+	worktree   string   // the agent workspace holding the edited file, to scope the posture gates
 	writePaths []string // worktree-relative prefixes the mode may write to
 	branch     string   // the agent's branch, for the default-branch commit gate (best-effort)
 }

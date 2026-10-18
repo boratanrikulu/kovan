@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/boratanrikulu/kovan/internal/config"
@@ -172,17 +173,24 @@ func emitGateDecision(ev hookEvent, m *session.Manifest, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The posture gates scope to the workspace holding the file, so an agent
+	// with worktrees in several repos is held to its mode in each, with each
+	// repo's own write_paths.
+	worktree, repo := m.Worktree, m.Repo
+	if w, ok := m.WorkspaceFor(filepath.Clean(ev.ToolInput.FilePath)); ok {
+		worktree, repo = w.Worktree, w.Repo
+	}
 	var readOnly bool
 	var writePaths []string
 	if editTools[ev.ToolName] {
-		readOnly, writePaths = modeScope(m)
+		readOnly, writePaths = modeScope(m.TaskMode, repo)
 	}
 	res := evalGates(gateInput{
 		toolName:   ev.ToolName,
 		command:    ev.ToolInput.Command,
 		filePath:   ev.ToolInput.FilePath,
 		readOnly:   readOnly,
-		worktree:   m.Worktree,
+		worktree:   worktree,
 		writePaths: writePaths,
 		branch:     m.Branch,
 	}, global.Gates)
@@ -193,23 +201,23 @@ func emitGateDecision(ev hookEvent, m *session.Manifest, w io.Writer) error {
 }
 
 // modeScope resolves the agent's posture and write paths from the live
-// sources: its mode's mode.yaml, plus the repo config's write_paths as
+// sources: the mode's mode.yaml, plus repoName's config write_paths as
 // extra allowances. The repo paths only extend a mode that is already scoped
 // (read-only or path-scoped) — they never turn an unscoped edit mode into a
 // gated one. Fail-open: an unresolvable mode imposes no restrictions.
-func modeScope(m *session.Manifest) (readOnly bool, writePaths []string) {
+func modeScope(taskMode, repoName string) (readOnly bool, writePaths []string) {
 	home, err := config.Dir()
 	if err != nil {
 		return false, nil
 	}
-	md, err := mode.Load(home, m.TaskMode)
+	md, err := mode.Load(home, taskMode)
 	if err != nil {
 		return false, nil
 	}
 	readOnly = md.ReadOnly()
 	writePaths = md.WritePaths
-	if (readOnly || len(writePaths) > 0) && m.Repo != "" {
-		if repo, err := config.LoadRepo(home, m.Repo); err == nil {
+	if (readOnly || len(writePaths) > 0) && repoName != "" {
+		if repo, err := config.LoadRepo(home, repoName); err == nil {
 			writePaths = append(writePaths, repo.WritePaths...)
 		}
 	}

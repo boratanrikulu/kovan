@@ -55,6 +55,7 @@ func init() {
 	startCmd.GroupID = "agents"
 	openCmd.GroupID = "agents"
 	removeCmd.GroupID = "agents"
+	worktreeCmd.GroupID = "agents"
 	statusCmd.GroupID = "agents"
 	methodCmd.GroupID = "method"
 
@@ -75,6 +76,7 @@ func init() {
 		startCmd,
 		openCmd,
 		removeCmd,
+		worktreeCmd,
 		statusCmd,
 		methodCmd,
 		gateCmd,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/method"
 	"github.com/boratanrikulu/kovan/internal/runner"
+	"github.com/boratanrikulu/kovan/internal/session"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -213,6 +215,7 @@ const (
 	modeFilter
 	modeMonitor
 	modeColumns
+	modePickWorkspace
 )
 
 type model struct {
@@ -233,6 +236,13 @@ type model struct {
 	// ~/.kovan/board.yaml) and the overlay's cursor over the ordered columns.
 	layout    boardLayout
 	colCursor int
+
+	// modePickWorkspace: the app (editor/merge/terminal) waiting for the user to
+	// pick which of a multi-repo agent's worktrees to open it on.
+	pickKind   string
+	pickCursor int
+	pickID     string              // the agent the picker opened for, for the status line
+	pickSpaces []session.Workspace // its worktrees, fixed when the picker opened so a board refresh cannot swap the agent
 
 	// modeMethod: the inspected agent's effective layers, a flat cursor over the
 	// real files (empty layers are skipped), and an isolated viewport for the
@@ -509,6 +519,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleMonitorKey(msg)
 	case modeColumns:
 		return m.handleColumnsKey(msg)
+	case modePickWorkspace:
+		return m.handlePickKey(msg)
 	}
 
 	// Peek scrolling is separate from board navigation so j/k stay on the board.
@@ -550,11 +562,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case actMethod:
 		return m.enterMethod()
 	case actEdit:
-		m.openApp(func(a config.Apps) string { return a.Editor }, "editor")
+		m.startApp("editor")
 	case actMerge:
-		m.openApp(func(a config.Apps) string { return a.Merge }, "merge")
+		m.startApp("merge")
 	case actTerminal:
-		m.openTerminalApp()
+		m.startApp("terminal")
 	case actNotes:
 		m.openNotesApp()
 	case actConfigure:
@@ -782,10 +794,9 @@ func (m *model) attachClipboardImage() {
 	}
 }
 
-// openApp launches a configured external program (editor or git GUI) on the
-// selected agent's worktree, detached. pick selects which command from the
-// config; label names it for the status line. It never blocks the board.
-func (m *model) openApp(pick func(config.Apps) string, label string) {
+// startApp opens app kind (editor / merge / terminal) on the selected agent's
+// worktree. An agent with worktrees in several repos gets a picker first.
+func (m *model) startApp(kind string) {
 	row := m.current()
 	if row == nil {
 		return
@@ -794,39 +805,85 @@ func (m *model) openApp(pick func(config.Apps) string, label string) {
 		m.setErrMsg("no worktree for " + row.ID)
 		return
 	}
-	global, err := config.LoadGlobal()
-	if err != nil {
-		m.setErr(err)
+	if len(row.Extra) == 0 {
+		m.openAppOn(kind, row.Worktree)
 		return
 	}
-	if err := launchApp(pick(global.Apps), row.Worktree); err != nil {
-		m.setErr(err)
-		return
-	}
-	m.setInfo("opened " + label + " · " + row.ID)
+	m.mode, m.pickKind, m.pickCursor = modePickWorkspace, kind, 0
+	m.pickID, m.pickSpaces = row.ID, row.workspaces()
+	m.dismissOnSwitch()
 }
 
-// openTerminalApp opens a terminal in the selected agent's worktree (a new iTerm2
-// tab by default; apps.terminal overrides), detached.
-func (m *model) openTerminalApp() {
-	row := m.current()
-	if row == nil {
-		return
-	}
-	if row.Worktree == "" {
-		m.setErrMsg("no worktree for " + row.ID)
-		return
-	}
+// openAppOn launches app kind on worktree, detached, so it never blocks the
+// board.
+func (m *model) openAppOn(kind, worktree string) {
 	global, err := config.LoadGlobal()
 	if err != nil {
 		m.setErr(err)
 		return
 	}
-	if err := openTerminal(global.Apps, row.Worktree); err != nil {
+	switch kind {
+	case "editor":
+		err = launchApp(global.Apps.Editor, worktree)
+	case "merge":
+		err = launchApp(global.Apps.Merge, worktree)
+	default:
+		err = openTerminal(global.Apps, worktree)
+	}
+	if err != nil {
 		m.setErr(err)
 		return
 	}
-	m.setInfo("opened terminal · " + row.ID)
+	m.setInfo("opened " + kind + " · " + filepath.Base(worktree))
+}
+
+// handlePickKey drives the workspace picker: j/k moves, enter opens the app on
+// the chosen worktree, esc goes back.
+func (m model) handlePickKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeBoard
+		return m, nil
+	case "enter":
+		m.mode = modeBoard
+		if target := m.pickTarget(); target != "" {
+			m.openAppOn(m.pickKind, target)
+		}
+		return m, nil
+	}
+	switch keys.action(msg) {
+	case actUp:
+		if m.pickCursor > 0 {
+			m.pickCursor--
+		}
+	case actDown:
+		if m.pickCursor < len(m.pickSpaces)-1 {
+			m.pickCursor++
+		}
+	}
+	return m, nil
+}
+
+// pickTarget is the worktree under the picker's cursor.
+func (m model) pickTarget() string {
+	if m.pickCursor >= len(m.pickSpaces) {
+		return ""
+	}
+	return m.pickSpaces[m.pickCursor].Worktree
+}
+
+// pickView renders the workspace picker box.
+func (m model) pickView() string {
+	lines := []string{fmt.Sprintf("Open %s for %s in:", m.pickKind, m.pickID), ""}
+	for i, w := range m.pickSpaces {
+		gutter := "  "
+		if i == m.pickCursor {
+			gutter = "› "
+		}
+		lines = append(lines, fmt.Sprintf("%s%-16s %s", gutter, truncate(w.Repo, 16), w.Worktree))
+	}
+	lines = append(lines, "", dimStyle.Render("j/k move · enter open · esc back"))
+	return strings.Join(lines, "\n")
 }
 
 // openNotesApp opens the selected agent's durable task-doc dir in the editor,
@@ -983,6 +1040,9 @@ func (m model) View() string {
 	}
 	if m.mode == modeColumns {
 		return m.centered(boxStyle.Render(m.columnsView()))
+	}
+	if m.mode == modePickWorkspace {
+		return m.centered(boxStyle.Render(m.pickView()))
 	}
 	if m.mode == modeForm {
 		// Full-screen so a long brief has room; status + hints pinned at the bottom.
@@ -1216,7 +1276,7 @@ type boardColumn struct {
 var boardColumns = []boardColumn{
 	{"STATE", func(r boardRow) string { return r.State }},
 	{"ID", idCell},
-	{"REPO", func(r boardRow) string { return r.Repo }},
+	{"REPO", repoCell},
 	{"MODE", func(r boardRow) string { return orDash(r.Mode) }},
 	{"AGE", func(r boardRow) string { return r.Age }},
 	{"ACCOUNT", func(r boardRow) string { return orDash(r.Account) }},

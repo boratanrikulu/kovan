@@ -9,6 +9,7 @@ import (
 	"github.com/boratanrikulu/kovan/internal/config"
 	"github.com/boratanrikulu/kovan/internal/method"
 	"github.com/boratanrikulu/kovan/internal/mode"
+	"github.com/boratanrikulu/kovan/internal/session"
 )
 
 // CLAUDE.local.md loads every session, survives compaction, is per-worktree and
@@ -25,8 +26,10 @@ const (
 // writeClaudeLocal upserts the kovan-managed block into the worktree's
 // CLAUDE.local.md: the brief pointer plus @import lines for this agent's method
 // layers (account, domain, project-private). taskAbs is the agent's durable
-// task-doc dir (outside the worktree). The user's own content is intact.
-func writeClaudeLocal(worktree, id, title, taskAbs, account, domain, repo string, m *mode.Mode) error {
+// task-doc dir (outside the worktree). extra lists the agent's worktrees in
+// other repos, each with its repo's project-private layer. The user's own
+// content is intact.
+func writeClaudeLocal(worktree, id, title, taskAbs, account, domain, repo string, m *mode.Mode, extra []session.Workspace) error {
 	path := filepath.Join(worktree, claudeLocalFile)
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -44,7 +47,10 @@ func writeClaudeLocal(worktree, id, title, taskAbs, account, domain, repo string
 			}
 		}
 	}
-	if section := methodSection(account, domain, repo, modeMethod); section != "" {
+	if section := workspacesSection(worktree, repo, extra); section != "" {
+		block += "\n\n" + section
+	}
+	if section := methodSection(account, domain, repo, modeMethod, extra); section != "" {
 		block += "\n\n" + section
 	}
 	out := upsertManagedBlock(string(existing), block)
@@ -55,9 +61,10 @@ func writeClaudeLocal(worktree, id, title, taskAbs, account, domain, repo string
 }
 
 // methodSection renders @import lines for the agent's per-worktree method layers
-// plus the task mode's own method file (modeMethod, "" when the mode ships none),
-// or "" when nothing contributes a file.
-func methodSection(account, domain, repo, modeMethod string) string {
+// plus the task mode's own method file (modeMethod, "" when the mode ships none)
+// and each extra workspace's project-private layer, or "" when nothing
+// contributes a file.
+func methodSection(account, domain, repo, modeMethod string, extra []session.Workspace) string {
 	home, err := config.Dir()
 	if err != nil {
 		return ""
@@ -65,7 +72,11 @@ func methodSection(account, domain, repo, modeMethod string) string {
 	// Only the directly-listed files get an @import line; Claude Code expands
 	// their transitive imports itself, so we skip Depth > 0.
 	var files []string
-	for _, l := range method.Worktree(home, account, domain, repo) {
+	layers := method.Worktree(home, account, domain, repo)
+	for _, w := range extra {
+		layers = append(layers, method.Worktree(home, "", "", w.Repo)...)
+	}
+	for _, l := range layers {
 		for _, f := range l.Files {
 			if f.Depth == 0 {
 				files = append(files, f.Path)
@@ -81,6 +92,25 @@ func methodSection(account, domain, repo, modeMethod string) string {
 	return "## Method\n\n" + importLines(files)
 }
 
+// workspacesSection lists the agent's worktrees when it works in more than one
+// repo, or "" for a single-repo agent.
+func workspacesSection(worktree, repo string, extra []session.Workspace) string {
+	if len(extra) == 0 {
+		return ""
+	}
+	lines := []string{
+		"## Workspaces",
+		"",
+		"You work in more than one repo. Each has its own worktree and branch; edit a repo only inside its worktree.",
+		"",
+		fmt.Sprintf("- `%s`: `%s` (this one)", repo, worktree),
+	}
+	for _, w := range extra {
+		lines = append(lines, fmt.Sprintf("- `%s`: `%s`, branch `%s`", w.Repo, w.Worktree, w.Branch))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // claudeLocalBlock is the maintenance protocol the agent reads each session: the
 // brief to execute and where to keep status, learnings, and the test plan. The
 // docs live in the durable kovan store, so the paths are absolute.
@@ -88,10 +118,20 @@ func claudeLocalBlock(id, title, taskAbs string, m *mode.Mode) string {
 	ctx := filepath.Join(taskAbs, "context.md")
 	learnings := filepath.Join(taskAbs, "learnings.md")
 	protocol := modeProtocol(taskAbs, m)
-	return fmt.Sprintf(`## Task — %s: %s  (mode: %s)
+	return fmt.Sprintf(`%s %s  (mode: %s)
 
 Brief: %s — read it first. %s Keep the brief's Status current; record gotchas in %s.`,
-		id, title, modeName(m), ctx, protocol, learnings)
+		taskHeading(id), title, modeName(m), ctx, protocol, learnings)
+}
+
+// taskHeading opens the managed block; it names the agent that owns the block.
+func taskHeading(id string) string {
+	return fmt.Sprintf("## Task — %s:", id)
+}
+
+// ownsClaudeLocal reports whether content's managed block belongs to agent id.
+func ownsClaudeLocal(content, id string) bool {
+	return strings.Contains(content, managedStart+"\n"+taskHeading(id))
 }
 
 // modeName is the mode's name, or "code" when unset (older manifests / quick).

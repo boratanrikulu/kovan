@@ -205,6 +205,78 @@ func TestRunGateLiveModeScope(t *testing.T) {
 	}
 }
 
+func TestRunGateScopesExtraWorkspaces(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KOVAN_HOME", home)
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(home, "config.yaml"), "notify: none\n")
+	write(filepath.Join(home, "modes", "scoped", "prompt.md"), "scoped: {{brief}}")
+	write(filepath.Join(home, "modes", "scoped", "mode.yaml"), "posture: read-only\n")
+	// Only the cloud repo carves out Notes/, so the carve-out resolves against
+	// the workspace the file is in, with that repo's config.
+	write(config.RepoConfigPath(home, "cloud"), "write_paths:\n  - Notes/\n")
+
+	primary, extra := t.TempDir(), t.TempDir()
+	m := &session.Manifest{ID: "M-1", Title: "g", Repo: "agent", Worktree: primary, RepoRoot: primary, Tmux: "tm", State: "working", TaskMode: "scoped",
+		SessionID: "sid-1", Extra: []session.Workspace{{Repo: "cloud", RepoRoot: extra, Worktree: extra}}}
+	if err := m.Write(); err != nil {
+		t.Fatal(err)
+	}
+	edit := func(path string) string {
+		t.Helper()
+		in := `{"hook_event_name":"PreToolUse","session_id":"sid-1","cwd":"` + primary + `","tool_name":"Edit","tool_input":{"file_path":"` + path + `"}}`
+		var buf bytes.Buffer
+		if err := runGate(strings.NewReader(in), &buf); err != nil {
+			t.Fatal(err)
+		}
+		return buf.String()
+	}
+
+	if out := edit(extra + "/web/app.ts"); !strings.Contains(out, "read-only") {
+		t.Errorf("a read-only agent editing its cloud worktree should ask, got %q", out)
+	}
+	if out := edit(extra + "/Notes/idea.md"); out != "" {
+		t.Errorf("cloud's write_paths should allow its Notes/, got %q", out)
+	}
+	if out := edit(primary + "/Notes/idea.md"); !strings.Contains(out, "read-only") {
+		t.Errorf("cloud's write_paths must not open the agent repo's Notes/, got %q", out)
+	}
+}
+
+func TestRunGateCwdFallbackIgnoresExtras(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KOVAN_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("notify: none\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	primary, extra := t.TempDir(), t.TempDir()
+	m := &session.Manifest{ID: "M-1", Repo: "agent", Worktree: primary, Tmux: "tm", State: "idle", SessionID: "sid-agent",
+		Extra: []session.Workspace{{Repo: "cloud", Worktree: extra, Adopted: true}}}
+	if err := m.Write(); err != nil {
+		t.Fatal(err)
+	}
+	// A plain claude session Bora runs by hand in that worktree is not the agent.
+	in := `{"hook_event_name":"PreToolUse","session_id":"someone-else","cwd":"` + extra + `","tool_name":"Bash","tool_input":{"command":"git push"}}`
+	var buf bytes.Buffer
+	if err := runGate(strings.NewReader(in), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "" {
+		t.Errorf("an unrelated session in an extra worktree got a gate decision: %q", buf.String())
+	}
+	if got, _ := session.ReadByTmux("tm"); got.State != "idle" {
+		t.Errorf("agent state = %q, want untouched idle", got.State)
+	}
+}
+
 // TestRunGateUnknownModeFailsOpen: a deleted or unknown mode imposes no
 // posture restrictions — a config error must not lock an agent out.
 func TestRunGateUnknownModeFailsOpen(t *testing.T) {

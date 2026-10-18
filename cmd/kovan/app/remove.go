@@ -34,7 +34,9 @@ func init() {
 
 // removeAgent is the shared core behind both `kovan remove` and the TUI: it
 // runs the teardown hook, kills the session, and removes the worktree, keeping
-// the branch. It returns a one-line result for the caller to surface.
+// the branch. The agent's extra worktrees go the same way, except adopted ones
+// and ones another agent works in, which stay on disk. It returns a one-line
+// result for the caller to surface.
 func removeAgent(id string, force bool) (string, error) {
 	global, err := config.LoadGlobal()
 	if err != nil {
@@ -69,11 +71,25 @@ func removeAgent(id string, force bool) (string, error) {
 		return "", err
 	}
 
+	// Every extra is checked for uncommitted changes before anything is torn
+	// down, so a dirty one never leaves the agent half-removed. The extras are
+	// this tab's own, so they go even when sibling tabs keep the primary.
+	if !force {
+		for _, w := range m.Extra {
+			if err := guardClean(m.Tmux, w); err != nil {
+				return "", err
+			}
+		}
+	}
+
 	// First-in set the worktree up; last-out tears it down. While sibling tabs
 	// still occupy this worktree, removing one only stops that tab and drops its
 	// manifest — the worktree, branch, skills, hooks, and CLAUDE.local stay for the
 	// others. The dirty guard is skipped here because nothing is being removed.
 	if siblings := tabsSharingWorktree(m.Worktree, m.Tmux); siblings > 0 {
+		if err := teardownExtras(m); err != nil {
+			return "", err
+		}
 		if alive, _ := run.Exists(m.Tmux); alive {
 			if err := run.Kill(m.Tmux); err != nil {
 				return "", err
@@ -86,13 +102,12 @@ func removeAgent(id string, force bool) (string, error) {
 	}
 
 	if !force {
-		dirty, err := repo.Dirty(m.Worktree)
-		if err != nil {
+		if err := guardClean(m.Tmux, m.Workspaces()[0]); err != nil {
 			return "", err
 		}
-		if dirty {
-			return "", fmt.Errorf("worktree %s has uncommitted changes; commit them or rerun with --force", m.Worktree)
-		}
+	}
+	if err := teardownExtras(m); err != nil {
+		return "", err
 	}
 
 	// This checkout (in-place, or the last guest tab that shared it): there is no
@@ -164,4 +179,20 @@ func tabsSharingWorktree(worktree, exceptTmux string) int {
 		}
 	}
 	return n
+}
+
+// teardownExtras tears down every extra workspace of m (see teardownWorkspace).
+// It records progress in the manifest, so a failure part-way is retried from
+// where it stopped.
+func teardownExtras(m *session.Manifest) error {
+	for len(m.Extra) > 0 {
+		if err := teardownWorkspace(m, m.Extra[0]); err != nil {
+			return err
+		}
+		m.Extra = m.Extra[1:]
+		if err := m.Write(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

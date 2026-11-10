@@ -1,5 +1,9 @@
 # kovan
 
+<p align="center">
+  <img height="400" alt="image" src="https://github.com/user-attachments/assets/03a1ec36-df80-4cc2-a1ae-c7b54ecbf8ef" />
+</p>
+
 > **Teach your engineering methodology once. Every future agent inherits it.**
 
 ![test](https://github.com/boratanrikulu/kovan/actions/workflows/test.yml/badge.svg)
